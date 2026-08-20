@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jitang Simmer · 鸡汤电脑统计</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ 侧边栏（Spotify 风格） ============ -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      <span class="logo-text">Jitang Simmer</span>
+    </div>
+
+    <nav class="nav">
+      <a href="#sec-overview" class="nav-item on">
+        <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+        总览
+      </a>
+      <a href="#sec-total" class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M4 4h4v4H4zM10 4h4v4h-4zM16 4h4v4h-4zM4 10h4v4H4zM10 10h4v4h-4zM16 10h4v4h-4zM4 16h4v4H4zM10 16h4v4h-4zM16 16h4v4h-4z"/></svg>
+        时长点阵
+      </a>
+      <a href="#sec-apps" class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 6h12v2H3zm0 6h8v2H3z"/></svg>
+        软件时长
+      </a>
+      <a href="#sec-pie" class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M11 2v20C5.9 21.3 2 17 2 12S5.9 2.7 11 2zm2 0v9h9c-.5-4.8-4.2-8.5-9-9zm0 11v9c4.8-.5 8.5-4.2 9-9h-9z"/></svg>
+        时长分布
+      </a>
+      <a href="#sec-hardware" class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M13 3L4 14h6v7l9-11h-6V3z"/></svg>
+        硬件监控
+      </a>
+      <a href="#sec-whitelist" class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6l8-4zm-1.2 13.6l6-6-1.4-1.4-4.6 4.6-2.2-2.2-1.4 1.4 3.6 3.6z"/></svg>
+        白名单
+      </a>
+    </nav>
+
+    <div class="side-devices" id="sideDevices"></div>
+
+    <div class="side-foot">
+      <span class="dot-live"></span> 数据采集运行中<br>
+      <span class="side-ver">v0.3.0 · Mock Data</span>
+    </div>
+  </aside>
+
+  <!-- 移动端抽屉遮罩 -->
+  <div class="backdrop" id="backdrop"></div>
+
+  <!-- ============ 主内容区 ============ -->
+  <main class="main">
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-btn" id="menuBtn" aria-label="打开菜单">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+        </button>
+        <div>
+          <h1>鸡汤电脑统计</h1>
+          <p class="sub">Jitang Simmer · Track every minute on your machines</p>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="device-select" id="deviceSelect"></div>
+        <div class="range-tabs" id="rangeTabs">
+          <button data-range="daily" class="on">每日</button>
+          <button data-range="weekly">每周</button>
+          <button data-range="total">累计</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- 概览卡片 -->
+    <section class="ov-cards fade-up" id="sec-overview"></section>
+
+    <!-- 总时长：点阵图 + 折线图 -->
+    <section class="card fade-up" id="sec-total">
+      <div class="card-head">
+        <div>
+          <h2>使用总时长</h2>
+          <p class="card-sub" id="totalSub"></p>
+        </div>
+        <div class="year-pill">2026</div>
+      </div>
+      <div id="heatmapWrap" class="hm-wrap"></div>
+      <div class="hm-legend">
+        <span>Less</span>
+        <i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i>
+        <span>More</span>
+      </div>
+      <div class="divider"></div>
+      <div class="card-head slim">
+        <h3>时长趋势</h3>
+        <span class="hint" id="trendHint"></span>
+      </div>
+      <div id="trendWrap"></div>
+    </section>
+
+    <!-- 软件时长 + 饼图 -->
+    <div class="grid-2">
+      <section class="card fade-up" id="sec-apps">
+        <div class="card-head">
+          <div>
+            <h2>软件使用时长</h2>
+            <p class="card-sub" id="appsSub"></p>
+          </div>
+          <span class="hint">点击软件行展开更多图表</span>
+        </div>
+        <div id="appBars"></div>
+      </section>
+
+      <section class="card fade-up" id="sec-pie">
+        <div class="card-head">
+          <div>
+            <h2>时长分布</h2>
+            <p class="card-sub">全部软件时长占比</p>
+          </div>
+        </div>
+        <div class="pie-flex">
+          <div id="pieWrap"></div>
+          <ul class="pie-legend" id="pieLegend"></ul>
+        </div>
+      </section>
+    </div>
+
+    <!-- 硬件参数 -->
+    <section class="fade-up" id="sec-hardware">
+      <div class="sec-title">
+        <h2>硬件监控</h2>
+        <span class="hint">折线图 · 随「每日 / 每周 / 累计」切换粒度</span>
+      </div>
+      <div class="hw-grid" id="hwGrid"></div>
+    </section>
+
+    <!-- 白名单 -->
+    <section class="card fade-up" id="sec-whitelist">
+      <div class="card-head">
+        <div>
+          <h2>统计白名单</h2>
+          <p class="card-sub">仅统计白名单内软件的使用时长，关闭后立即从所有统计中剔除</p>
+        </div>
+        <div class="wl-actions">
+          <button class="btn-ghost" id="wlAll">全选</button>
+          <button class="btn-ghost" id="wlNone">清空</button>
+        </div>
+      </div>
+      <div class="wl-grid" id="wlGrid"></div>
+    </section>
+
+    <footer class="foot">
+      Jitang Simmer · 鸡汤电脑统计 · 当前所有数据为演示用假数据，接入真实采集后端后自动替换
+    </footer>
+  </main>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
