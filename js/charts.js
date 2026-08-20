@@ -113,7 +113,10 @@ const Charts = (() => {
         if (lv === 0) rect.setAttribute('stroke', '#21262d');
         rect.style.animationDelay = Math.min(c * 14 + r * 12, 1100) + 'ms';
         rect.addEventListener('mouseenter', e => {
-          showTip(`<span class="tip-date">${fmtDate(d.date)}</span><br><b>${fmtMin(d.minutes)}</b> · 使用时长`, e.clientX, e.clientY);
+          const tip = d.minutes == null
+            ? `<span class="tip-date">${fmtDate(d.date)}</span><br><b>暂无数据</b> · 未来日期`
+            : `<span class="tip-date">${fmtDate(d.date)}</span><br><b>${fmtMin(d.minutes)}</b> · 使用时长`;
+          showTip(tip, e.clientX, e.clientY);
         });
         rect.addEventListener('mousemove', e => moveTip(e.clientX, e.clientY));
         rect.addEventListener('mouseleave', hideTip);

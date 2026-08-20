@@ -153,11 +153,9 @@ body {
 .card-sub { color: var(--text-2); font-size: 12px; margin-top: 4px; }
 .hint { color: var(--text-3); font-size: 11.5px; }
 .divider { height: 1px; background: var(--border); margin: 18px -22px 4px; }
-.year-pill {
-  background: rgba(29,185,84,.12); color: var(--green-hi);
-  border: 1px solid rgba(29,185,84,.35);
-  font-size: 12px; font-weight: 700; padding: 4px 14px; border-radius: 99px;
-}
+/* 年份选择器：复用设备选择器样式，仅收窄下拉宽度 */
+.year-select .ds-list { min-width: 130px; }
+.year-select .ds-opt small { min-width: 3em; text-align: right; }
 .sec-title { display: flex; align-items: baseline; gap: 14px; margin: 4px 2px 14px; }
 .sec-title h2 { font-size: 16.5px; font-weight: 750; }
 

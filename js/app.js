@@ -26,9 +26,10 @@ const state = {
   range: 'daily',                                       // daily | weekly | total
   whitelist: loadWhitelist(),                           // 白名单（localStorage 持久化，默认全选）
   openApp: null,                                        // 当前展开的软件 id（切换设备/范围后自动恢复）
+  year: new Date().getFullYear(),                       // 点阵图所选年份
 };
 
-const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', total: '近一年' };
+const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', total: '累计' };
 const wlIds = () => [...state.whitelist];
 
 /* ---------------- 顶部：设备选择器 ---------------- */
@@ -118,6 +119,35 @@ function renderSideDevices() {
     </div>`).join('');
 }
 
+/* ---------------- 总时长卡片：年份选择器（与设备选择器同款 UI） ---------------- */
+function buildYearSelect() {
+  const wrap = $('#yearSelect');
+  const currentYear = new Date().getFullYear();
+  wrap.innerHTML = `
+    <button class="ds-btn"><span class="ds-name">${currentYear}</span><span class="caret">▼</span></button>
+    <div class="ds-list"></div>`;
+  const list = wrap.querySelector('.ds-list');
+  [...DB.yearList].reverse().forEach(y => {          // 新年份排在上面
+    const b = document.createElement('button');
+    b.className = 'ds-opt' + (y === state.year ? ' sel' : '');
+    b.innerHTML = `${y}<small>${y === currentYear ? '今年' : ''}</small>`;
+    b.addEventListener('click', () => {
+      state.year = y;
+      wrap.querySelector('.ds-name').textContent = y;
+      wrap.classList.remove('open');
+      list.querySelectorAll('.ds-opt').forEach(x => x.classList.remove('sel'));
+      b.classList.add('sel');
+      renderAll();                                  // 点阵图与详情里的年度点阵都随年份联动
+    });
+    list.appendChild(b);
+  });
+  wrap.querySelector('.ds-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    wrap.classList.toggle('open');
+  });
+  document.addEventListener('click', () => wrap.classList.remove('open'));
+}
+
 /* ---------------- 概览卡片 ---------------- */
 function renderOverview() {
   const ids = wlIds();
@@ -147,11 +177,11 @@ function renderOverview() {
 /* ---------------- 总时长：点阵图 + 趋势折线 ---------------- */
 function renderTotal() {
   const ids = wlIds();
-  const year = DB.yearSeries(state.device, ids);
-  const totalMin = year.reduce((s, d) => s + d.minutes, 0);
+  const year = DB.yearSeries(state.device, ids, state.year);
+  const totalMin = year.reduce((s, d) => s + (d.minutes || 0), 0);
   const activeDays = year.filter(d => d.minutes > 0).length;
   $('#totalSub').textContent =
-    `过去一年共 ${Math.floor(totalMin / 60).toLocaleString()} 小时 · ${activeDays} 天有使用记录 · 仅统计白名单软件`;
+    `${state.year} 年共 ${Math.floor(totalMin / 60).toLocaleString()} 小时 · ${activeDays} 天有使用记录 · 仅统计白名单软件`;
 
   Charts.heatmap($('#heatmapWrap'), year);
 
@@ -242,7 +272,7 @@ function renderApps() {
     Charts.vbars(bodies[0], { labels: wd.labels, values: wd.values, color: app.color, unit: ' 分钟（日均）' });
     const t = DB.trendSeries(state.device, [app.id], state.range);
     Charts.line(bodies[1], { labels: t.labels, values: t.values, color: app.color, unit: ' h', height: 200 });
-    Charts.heatmap(bodies[2], DB.yearSeries(state.device, [app.id]));
+    Charts.heatmap(bodies[2], DB.yearSeries(state.device, [app.id], state.year));
   }
 }
 
@@ -331,6 +361,7 @@ document.addEventListener('DOMContentLoaded', () => {
   Charts.init();
   buildDeviceSelect();
   buildRangeTabs();
+  buildYearSelect();
   buildSidebar();
   renderSideDevices();
   renderAll();

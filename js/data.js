@@ -17,10 +17,14 @@ const DB = (() => {
   const rand = mulberry32(20260820);
 
   /* ---------- 基础常量 ---------- */
-  const DAYS = 365;
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const DAY_MS = 86400000;
+  // 数据起点 2022-01-01，覆盖到今天，支持按自然年选择点阵图
+  const START = new Date(2022, 0, 1);
+  const DAYS = Math.round((today.getTime() - START.getTime()) / DAY_MS) + 1;
+  const yearList = [];
+  for (let y = START.getFullYear(); y <= today.getFullYear(); y++) yearList.push(y);
 
   const devices = [
     { id: 'desktop', name: '主力台式机', host: 'DESKTOP-K3', os: 'Windows 11 Pro', perf: 1.00, powerMin: 165, powerMax: 520 },
@@ -61,7 +65,7 @@ const DB = (() => {
     return 0.12 + g(10, 2.2) * 0.9 + g(15.5, 2.4) * 1.0 + g(21, 2.6) * 1.15;
   }
 
-  const dateOf = idx => new Date(today.getTime() - (DAYS - 1 - idx) * DAY_MS);
+  const dateOf = idx => new Date(START.getTime() + idx * DAY_MS);
 
   /* ---------- 软件使用时长（分钟） ---------- */
   // usage[deviceId][appId] = Float32Array(DAYS)
@@ -121,7 +125,7 @@ const DB = (() => {
         }
       } else if (m.id === 'disk') {
         const start = 58 + rand() * 8;
-        for (let i = 0; i < DAYS; i++) dArr[i] = +(start + i * 0.045 + rand() * 0.4).toFixed(1);
+        for (let i = 0; i < DAYS; i++) dArr[i] = +Math.min(95, start + i * 0.011 + rand() * 0.4).toFixed(1);
         for (let h = 0; h < 24; h++) hArr[h] = dArr[DAYS - 1];
       } else {
         const base = metricBase[m.id] * (m.id.includes('Temp') ? (0.9 + d.perf * 0.18) : 1);
@@ -155,10 +159,20 @@ const DB = (() => {
     return s;
   }
 
-  /* 年度点阵数据：[{date, minutes}] */
-  function yearSeries(deviceId, appIds) {
+  /* 某年点阵数据：[{date, minutes}]（完整自然年 1/1–12/31，未来日期 minutes 为 null） */
+  function yearSeries(deviceId, appIds, year) {
     const out = [];
-    for (let i = 0; i < DAYS; i++) out.push({ date: dateOf(i), minutes: sumDay(deviceId, appIds, i) });
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31);
+    const baseIdx = Math.round((start.getTime() - START.getTime()) / DAY_MS);
+    for (let t = start.getTime(); t <= end.getTime(); t += DAY_MS) {
+      const d = new Date(t);
+      const idx = baseIdx + Math.round((t - start.getTime()) / DAY_MS);
+      out.push({
+        date: d,
+        minutes: d.getTime() > today.getTime() ? null : sumDay(deviceId, appIds, idx),
+      });
+    }
     return out;
   }
 
@@ -178,9 +192,9 @@ const DB = (() => {
       }
       return { labels, values, unit: 'h' };
     }
-    // total：近 12 个月
+    // total：近 12 个月（与"累计=全部历史"的柱状/饼图区分开）
     const map = new Map();
-    for (let i = 0; i < DAYS; i++) {
+    for (let i = Math.max(0, DAYS - 365); i < DAYS; i++) {
       const d = dateOf(i);
       const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
       map.set(key, (map.get(key) || 0) + sumDay(deviceId, appIds, i));
@@ -248,7 +262,7 @@ const DB = (() => {
       return { labels, values };
     }
     const map = new Map();
-    for (let i = 0; i < DAYS; i++) {
+    for (let i = Math.max(0, DAYS - 365); i < DAYS; i++) {
       const d = dateOf(i);
       const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
       if (!map.has(key)) map.set(key, []);
@@ -276,7 +290,7 @@ const DB = (() => {
   }
 
   return {
-    devices, apps, metricDefs, DAYS, dateOf, today,
+    devices, apps, metricDefs, DAYS, yearList, dateOf, today,
     yearSeries, trendSeries, appTotals, appWeekday,
     metricSeries, metricCurrent, rangeTotalMinutes,
   };
