@@ -7,49 +7,47 @@ const $ = s => document.querySelector(s);
 
 let DB = MockDB;   // 启动时尝试切换为 LiveDB（见 DOMContentLoaded）
 
-/* ---------------- 白名单持久化（localStorage） ---------------- */
-const WL_KEY = 'simmer.whitelist';
-function loadWhitelist() {
+/* ---------------- localStorage 统一读写层（所有持久化必经之路） ----------------
+ * 键名一律内联字面量、不依赖任何外部常量——彻底免疫"常量声明在 state
+ * 之后导致 TDZ 静默失败"类问题（历史上已踩坑两次：WL_KEY / APPS_KEY）。
+ * 写入带回读校验：损坏立即在控制台报错，绝不静默丢数据。 */
+function loadJSON(key, fallback) {
   try {
-    const raw = localStorage.getItem(WL_KEY);
-    if (raw !== null) {
-      const saved = JSON.parse(raw);
-      // 原样恢复，不用任何软件清单做过滤校验——live（exe 名）与 mock（短 id）
-      // 是两套命名体系，过滤会把另一种体系的名单整个误杀成空集
-      if (Array.isArray(saved)) return new Set(saved);
-    }
-  } catch (e) { /* file:// 或隐私模式下 localStorage 可能不可用，回退默认全选 */ }
-  return new Set(MockDB.apps.map(a => a.id));
+    const v = JSON.parse(localStorage.getItem(key));
+    return (v === null || v === undefined) ? fallback : v;
+  } catch (e) { return fallback; }
 }
-function saveWhitelist() {
-  try { localStorage.setItem(WL_KEY, JSON.stringify([...state.whitelist])); } catch (e) {}
+function saveJSON(key, val) {
+  try {
+    const s = JSON.stringify(val);
+    localStorage.setItem(key, s);
+    if (localStorage.getItem(key) !== s) console.error('[simmer] 存储写入校验失败：', key);
+  } catch (e) { console.error('[simmer] 存储不可用：', key, e); }
 }
 
-/* ---------------- 软件清单持久化（localStorage） ----------------
- * 注意：本区块与上面的 WL_KEY 区块必须位于 const state 之前——
- * state 初始化会调用这些 load* 函数，常量若在其后会处于暂时性死区，
- * ReferenceError 被 try/catch 吞掉导致每次刷新静默读取为空（已两次踩坑）。 */
-const APPS_KEY = 'simmer.apps';
-const REMOVED_KEY = 'simmer.appsRemoved';
-const OFF_KEY = 'simmer.appsOff';
+function loadWhitelist() {
+  const saved = loadJSON('simmer.whitelist', null);
+  if (Array.isArray(saved)) return new Set(saved);   // 原样恢复，不做清单过滤（live/mock 两套命名体系）
+  return new Set(MockDB.apps.map(a => a.id));
+}
+function saveWhitelist() { saveJSON('simmer.whitelist', [...state.whitelist]); }
+
 function loadCustomApps() {
-  try { const a = JSON.parse(localStorage.getItem(APPS_KEY)); if (Array.isArray(a)) return a; } catch (e) {}
-  return [];
+  const a = loadJSON('simmer.apps', []);
+  return Array.isArray(a) ? a : [];
 }
 function loadRemovedApps() {
-  try { const a = JSON.parse(localStorage.getItem(REMOVED_KEY)); if (Array.isArray(a)) return new Set(a); } catch (e) {}
-  return new Set();
+  const a = loadJSON('simmer.appsRemoved', []);
+  return new Set(Array.isArray(a) ? a : []);
 }
 function loadOffApps() {
-  try { const a = JSON.parse(localStorage.getItem(OFF_KEY)); if (Array.isArray(a)) return new Set(a); } catch (e) {}
-  return new Set();
+  const a = loadJSON('simmer.appsOff', []);
+  return new Set(Array.isArray(a) ? a : []);
 }
 function saveAppsState() {
-  try {
-    localStorage.setItem(APPS_KEY, JSON.stringify(state.customApps));
-    localStorage.setItem(REMOVED_KEY, JSON.stringify([...state.removedApps]));
-    localStorage.setItem(OFF_KEY, JSON.stringify([...state.offApps]));
-  } catch (e) {}
+  saveJSON('simmer.apps', state.customApps);
+  saveJSON('simmer.appsRemoved', [...state.removedApps]);
+  saveJSON('simmer.appsOff', [...state.offApps]);
 }
 
 const state = {
@@ -574,6 +572,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   buildRangeTabs();
   buildSidebar();
 
+  // 启动自检：存储与内存状态不一致时在控制台报错（防静默丢失不可见，便于排查）
+  (function diagnose() {
+    const stored = loadJSON('simmer.apps', []);
+    if (Array.isArray(stored) && stored.length && !state.customApps.length) {
+      console.error('[simmer] 诊断：存储中有自定义软件但未加载到内存，持久化链路异常');
+    }
+  })();
+
   // 优先连接实时后端，失败回退 mock 数据
   try {
     const live = await LiveDB.create();
@@ -582,7 +588,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     //   首次访问 / 旧数据体系迁移 → 空白名单，由用户在「＋ 添加」中自主挑选
     //   已有存储 → 与当前软件清单取交集（用户关掉/删除的不复活）
     // 新检测到的进程永远不自动入名单，只出现在「添加软件」候选列表中。
-    const saved = localStorage.getItem(WL_KEY) !== null;
+    const saved = localStorage.getItem('simmer.whitelist') !== null;
     const ids = new Set(DB.apps.map(a => a.id));
     const stored = [...state.whitelist];
     const kept = stored.filter(id => ids.has(id));
