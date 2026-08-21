@@ -22,41 +22,46 @@ GitHub Contributions 式点阵图 × Spotify 深色绿色系 · 纯前端零依�
 
 ## 🚀 如何运行
 
-纯静态页面，**双击 `index.html` 即可**（推荐 Chrome / Edge）。
+**M1 起系统由三个部分组成**：
 
-如需本地服务方式预览：
-
-```bash
-npx serve .        # 或
-python -m http.server
+```
+collector/（C# 采集端·每台电脑） ──上报──▶ server/（Node 后端·SQLite） ◀──查询── 前端（本仓库根目录）
 ```
 
-> 当前内置固定种子的演示假数据（365 天 × 3 台设备 × 13 款软件），每次打开结果一致；接入真实采集后端后自动替换。
+1. **启动后端**：`cd server && npm install && npm start` → `http://localhost:8788`（首启自动生成 `config.json` 含上报 token）
+2. **启动采集端**：`cd collector/SimmerCollector && dotnet build -c Release`，运行 `bin/Release/net8.0-windows/SimmerCollector.exe`，托盘右键「设置」填入 Token（无后端时前端自动回退演示数据）
+3. **查看面板**：直接访问 `http://localhost:8788/index.html`（顶栏显示 ● 实时数据）
+
+> 无后端时双击 `index.html` 仍可看内置演示假数据（固定种子，365 天 × 3 设备 × 13 软件）。
 
 ## 🛠️ 技术栈
 
-- HTML + CSS + **原生 JavaScript**，零框架、零图表库、零构建
-- 全部图表手写 SVG：Catmull-Rom 平滑折线、分位数分档点阵图、环形图、柱状图
-- 数据层与展示层解耦——对接真实后端只需替换 `js/data.js` 的导出函数
+- **前端**：HTML + CSS + 原生 JavaScript，零框架、零图表库、零构建；图表手写 SVG（Catmull-Rom 平滑折线、绝对时长 6 档点阵图等）
+- **采集端**：C# / .NET 8 WinForms 托盘程序，P/Invoke（`GetForegroundWindow` 前台监听、`GetLastInputInfo` 空闲检测），本地队列断网不丢、失败自动重试
+- **后端**：Node.js Express + better-sqlite3；上报接口 Bearer token 鉴权 + 幂等；查询接口与前端 mock 层同构，可无缝切换
 
 ## 📁 目录结构
 
 ```
-├── index.html          # 页面结构（侧边栏 + 顶栏 + 六大区块）
+├── index.html          # 前端页面（侧边栏 + 顶栏 + 六大区块）
 ├── css/style.css       # GitHub × Spotify 深色主题与动效
 ├── js/
-│   ├── data.js         # 假数据层（未来对接真实后端只需替换此文件）
+│   ├── data.js         # MockDB：演示假数据（后端不可用时回退）
+│   ├── live.js         # LiveDB：实时数据源（对接后端，与 MockDB 同构）
 │   ├── charts.js       # 图表渲染引擎（heatmap / line / hbars / donut / vbars）
 │   └── app.js          # 状态管理 + 渲染调度
-└── docs/交接文档.md     # 详细交接文档（需求对照 / 设计决策 / 变更记录）
+├── collector/          # C# 采集端（WinForms 托盘，M1）
+├── server/             # Node.js 中心后端（Express + SQLite，M1）
+└── docs/               # 交接文档 / 需求文档
 ```
 
 ## 🗺️ 路线图
 
-- [ ] Windows 采集端：前台进程轮询（`GetForegroundWindow`）+ LibreHardwareMonitor 硬件指标，按分钟聚合上报
-- [ ] 服务端：按设备 + 日期存储，多设备聚合接口
-- [ ] 白名单云端同步
-- [ ] 更多统计维度（网络流量、电量、外设使用等）
+- [x] M1 最小闭环：Windows 采集端（前台窗口 + 空闲检测 + 托盘 + 断网缓存）+ Node 后端（上报 + SQLite + 聚合接口）+ 前端实时数据源 ✅ 2026-08-21
+- [ ] M1.5：硬件指标采集（LibreHardwareMonitor：CPU/GPU 温度、功耗、占用、显存、硬盘）
+- [ ] 采集端进程映射编辑器与开机自启（CAP-02/04 收尾）
+- [ ] 白名单云端同步、多设备长期运行打磨
+- [ ] 前端增强（实时仪表 / 时段热力图 / 成就 / 命令面板等，见需求文档 FE 系列）
 
 ## 📄 License
 

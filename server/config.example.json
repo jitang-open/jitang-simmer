@@ -1,0 +1,6 @@
+# Simmer Server 配置示例（复制为 config.json；首启也会自动生成）
+# token 用于采集端上报鉴权，请勿提交真实 config.json 到仓库
+{
+  "token": "change-me",
+  "port": 8788
+}

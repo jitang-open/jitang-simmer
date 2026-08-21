@@ -8,7 +8,11 @@
  * ============================================================ */
 const Charts = (() => {
   const NS = 'http://www.w3.org/2000/svg';
-  const LEVELS = ['#161b22', '#0e4429', '#006d32', '#26a641', '#39d353'];
+  // 10 色（空 + 8 档）纯绿梯度，暗 → 亮（#03301a → #39d353 线性插值）
+  const LEVELS = ['#161b22', '#03301a', '#0a4421', '#115928', '#176d30', '#1e8237', '#25963e', '#2cab45', '#32bf4c', '#39d353'];
+  // 绝对时长分档（小时）：>0 → 档1，累计达到 0.5/1/1.5/2/2.5/3/3.5/4h → 档2~9；
+  // 全站（总时长与单软件点阵）统一阈值，颜色即强度，4h 顶格
+  const LEVEL_HOURS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
   let tip = null;
   let gradSeq = 0;
 
@@ -47,10 +51,10 @@ const Charts = (() => {
 
   /* ============================================================
    * GitHub 风格点阵图
-   * days: [{date:Date, minutes:Number}]
-   * opts.thresholds: [t1,t2,t3] 分档阈值（小时）
+   * days: [{date:Date, minutes:Number}]（minutes 为 null 表示未来日期）
+   * 分档：绝对时长（LEVEL_HOURS），全站统一阈值
    * ============================================================ */
-  function heatmap(container, days, opts = {}) {
+  function heatmap(container, days) {
     container.innerHTML = '';
     const cell = 11, gap = 3, rows = 7, left = 30, top = 18;
     const n = days.length;
@@ -58,14 +62,6 @@ const Charts = (() => {
     const cols = Math.ceil((firstDow + n) / rows);
     const W = left + cols * (cell + gap) + 8;
     const H = top + rows * (cell + gap) + 2;
-    const maxH = Math.max(...days.map(d => d.minutes / 60), 0.1);
-    // 默认按分位数分档（与 GitHub 贡献图一致），保证深绿/浅绿/空格自然分布
-    let th = opts.thresholds;
-    if (!th) {
-      const sorted = days.map(d => d.minutes / 60).filter(v => v > 0).sort((a, b) => a - b);
-      const q = p => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : maxH;
-      th = [q(0.35), q(0.62), q(0.86)];
-    }
 
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'hm-svg' });
     svg.style.width = '100%';
@@ -99,12 +95,10 @@ const Charts = (() => {
         const idx = c * 7 + r - firstDow;
         if (idx < 0 || idx >= n) continue;
         const d = days[idx];
-        const hours = d.minutes / 60;
+        const hours = (d.minutes || 0) / 60;
         let lv = 0;
         if (hours > 0) lv = 1;
-        if (hours >= th[0]) lv = 2;
-        if (hours >= th[1]) lv = 3;
-        if (hours >= th[2]) lv = 4;
+        for (let i = 0; i < LEVEL_HOURS.length; i++) if (hours >= LEVEL_HOURS[i]) lv = i + 2;
         const rect = el('rect', {
           x: left + c * (cell + gap), y: top + r * (cell + gap),
           width: cell, height: cell, rx: 2.5,

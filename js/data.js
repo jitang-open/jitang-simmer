@@ -1,9 +1,9 @@
 /* ============================================================
  * Simmer · 假数据模块（Mock Data Layer）
  * - 使用固定种子的伪随机数，保证每次刷新页面数据一致
- * - 后续接入真实后端时，仅需替换本文件中的数据获取函数
+ * - 后端不可用时作为回退数据源（见 js/live.js 与 app.js 启动逻辑）
  * ============================================================ */
-const DB = (() => {
+const MockDB = (() => {
 
   /* ---------- 可复现随机数 ---------- */
   function mulberry32(seed) {
@@ -290,8 +290,10 @@ const DB = (() => {
   }
 
   return {
+    live: false,
     devices, apps, metricDefs, DAYS, yearList, dateOf, today,
     yearSeries, trendSeries, appTotals, appWeekday,
     metricSeries, metricCurrent, rangeTotalMinutes,
+    allApps: async () => apps.map(a => ({ id: a.id, minutes: Math.round(a.base) })),
   };
 })();

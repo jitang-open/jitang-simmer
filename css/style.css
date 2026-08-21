@@ -82,6 +82,16 @@ body {
 .main { flex: 1; margin: 0 auto; padding: 26px 34px 40px; max-width: 1240px; }
 
 .topbar { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 14px; margin-bottom: 22px; }
+
+/* 后端未连接回退演示数据时的醒目提示 */
+.fallback-banner {
+  background: rgba(227, 179, 65, .1);
+  border: 1px solid rgba(227, 179, 65, .45);
+  color: #e3b341;
+  border-radius: 10px; padding: 10px 14px;
+  font-size: 12.5px; font-weight: 650;
+  margin-bottom: 18px;
+}
 .topbar h1 { font-size: 24px; font-weight: 800; letter-spacing: .3px; }
 .topbar .sub { color: var(--text-2); font-size: 12.5px; margin-top: 4px; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
@@ -205,10 +215,15 @@ body {
 .hm-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 8px; color: var(--text-3); font-size: 11px; }
 .hm-legend i { width: 10px; height: 10px; border-radius: 2.5px; display: inline-block; }
 .hm-legend .lv0 { background: var(--gh-0); border: 1px solid var(--border-hi); }
-.hm-legend .lv1 { background: var(--gh-1); }
-.hm-legend .lv2 { background: var(--gh-2); }
-.hm-legend .lv3 { background: var(--gh-3); }
-.hm-legend .lv4 { background: var(--gh-4); }
+.hm-legend .lv1 { background: #03301a; }
+.hm-legend .lv2 { background: #0a4421; }
+.hm-legend .lv3 { background: #115928; }
+.hm-legend .lv4 { background: #176d30; }
+.hm-legend .lv5 { background: #1e8237; }
+.hm-legend .lv6 { background: #25963e; }
+.hm-legend .lv7 { background: #2cab45; }
+.hm-legend .lv8 { background: #32bf4c; }
+.hm-legend .lv9 { background: #39d353; }
 
 /* ---------------- 折线图 ---------------- */
 .lc-grid { stroke: var(--border); stroke-dasharray: 3 4; }
@@ -297,6 +312,12 @@ body {
 .pie-legend .pl-pct { margin-left: auto; color: var(--text-2); font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* ---------------- 硬件监控 ---------------- */
+.hw-empty {
+  grid-column: 1 / -1;
+  color: var(--text-3); font-size: 12.5px;
+  background: #131820; border: 1px dashed var(--border-hi);
+  border-radius: 11px; padding: 22px; text-align: center;
+}
 .hw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-bottom: 22px; }
 .hw-card {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
@@ -318,6 +339,12 @@ body {
 }
 .btn-ghost:hover { color: var(--green-hi); border-color: var(--green); }
 .wl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.wl-empty {
+  grid-column: 1 / -1;
+  color: var(--text-3); font-size: 12.5px;
+  background: #131820; border: 1px dashed var(--border-hi);
+  border-radius: 11px; padding: 22px; text-align: center;
+}
 .wl-item {
   display: flex; align-items: center; gap: 12px;
   background: #131820; border: 1px solid var(--border);
@@ -329,7 +356,25 @@ body {
 .wl-icon { width: 36px; height: 36px; border-radius: 9px; background: #232830; display: flex; align-items: center; justify-content: center; font-size: 18px; }
 .wl-info { flex: 1; min-width: 0; }
 .wl-name { font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wl-id {
+  font-size: 10px; color: var(--text-3); background: #1c2129;
+  border-radius: 4px; padding: 0 4px; margin-left: 6px;
+  font-family: Consolas, monospace; font-weight: 400;
+}
 .wl-cat { font-size: 11px; color: var(--text-3); }
+.wl-ops { display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.wl-item:hover .wl-ops, .wl-item:focus-within .wl-ops { opacity: 1; }
+.wl-op {
+  width: 26px; height: 26px; border-radius: 6px;
+  background: #232830; border: 1px solid var(--border-hi);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0; transition: all .15s;
+}
+.wl-op svg { width: 13px; height: 13px; fill: var(--text-3); }
+.wl-op:hover { border-color: var(--green); }
+.wl-op:hover svg { fill: var(--green-hi); }
+.wl-op-del:hover { border-color: #da3633; }
+.wl-op-del:hover svg { fill: #f85149; }
 .wl-toggle {
   width: 40px; height: 22px; border-radius: 99px; border: none;
   background: #30363d; position: relative; cursor: pointer; flex-shrink: 0;
@@ -342,6 +387,47 @@ body {
 }
 .wl-toggle.on { background: var(--green); }
 .wl-toggle.on::after { transform: translateX(18px); }
+
+/* ---------------- 添加 / 编辑软件对话框 ---------------- */
+.app-form-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(1, 4, 9, .68);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn .18s ease;
+}
+.app-form {
+  width: 360px; max-width: calc(100vw - 40px);
+  background: var(--card); border: 1px solid var(--border-hi);
+  border-radius: 14px; padding: 20px 22px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.55);
+  animation: dropIn .22s ease;
+}
+.app-form h3 { font-size: 15px; font-weight: 750; margin-bottom: 14px; }
+.app-form label { display: block; font-size: 12px; font-weight: 650; color: var(--text-2); margin: 10px 0 5px; }
+.app-form .req { color: #f85149; margin-left: 2px; }
+.app-form .hint-inline { font-weight: 400; color: var(--text-3); margin-left: 6px; }
+.app-form input, .app-form select {
+  width: 100%; background: #0d1117; border: 1px solid var(--border-hi);
+  color: var(--text); border-radius: 8px; padding: 8px 10px;
+  font-size: 13px; font-family: var(--font); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.app-form input:focus, .app-form select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(29,185,84,.15); }
+.app-form input.af-invalid { border-color: #da3633; box-shadow: 0 0 0 3px rgba(248,81,73,.15); }
+.af-palette { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 4px; }
+.cp-item {
+  width: 22px; height: 22px; border-radius: 7px; cursor: pointer;
+  border: 2px solid transparent; transition: transform .12s, border-color .12s;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-style: normal; font-size: 12px; line-height: 1;
+}
+.cp-item:hover { transform: scale(1.15); }
+.cp-item.sel { border-color: #fff; }
+.cp-random {
+  background: #0d1117; border: 1px dashed var(--border-hi); color: var(--text-2);
+}
+.cp-random:hover { border-color: var(--green); color: var(--green-hi); transform: scale(1.15) rotate(12deg); }
+.af-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 /* ---------------- Tooltip ---------------- */
 .chart-tip {
