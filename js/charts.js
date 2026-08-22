@@ -6,11 +6,41 @@
  *  - donut   : 环形占比图
  *  - vbars   : 竖向柱状图（星期分布）
  * ============================================================ */
+/*
+ * 为每张点阵图独立建立比例色阶。
+ * 使用最近秩 P95 作为满色上限，避免极少数异常高值压暗其余日期。
+ */
+function buildHeatmapScale(days) {
+  const values = days
+    .map(day => day && day.minutes)
+    .filter(minutes => Number.isFinite(minutes) && minutes > 0)
+    .sort((a, b) => a - b);
+  const capMinutes = values.length
+    ? values[Math.ceil(values.length * 0.95) - 1]
+    : 0;
+  const thresholds = capMinutes > 0
+    ? Array.from({ length: 8 }, (_, index) => capMinutes * (index + 1) / 8)
+    : [];
+
+  function level(minutes) {
+    if (!Number.isFinite(minutes) || minutes <= 0 || capMinutes <= 0) return 0;
+    let result = 1;
+    thresholds.forEach(threshold => { if (minutes >= threshold) result += 1; });
+    return Math.min(result, 9);
+  }
+
+  return { capMinutes, thresholds, level };
+}
+
 const Charts = (() => {
   const NS = 'http://www.w3.org/2000/svg';
-  const LEVELS = ['#161b22', '#0e4429', '#006d32', '#26a641', '#39d353'];
+  // 10 色（空 + 9 档）纯绿梯度，暗 → 亮（#03301a → #39d353 线性插值）
+  const LEVELS = ['#161b22', '#03301a', '#0a4421', '#115928', '#176d30', '#1e8237', '#25963e', '#2cab45', '#32bf4c', '#39d353'];
   let tip = null;
   let gradSeq = 0;
+  const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
+  const safeColor = value => /^#[0-9a-f]{6}$/i.test(String(value)) ? String(value) : '#8b949e';
 
   /* ---------- 全局 tooltip ---------- */
   function init() {
@@ -47,10 +77,10 @@ const Charts = (() => {
 
   /* ============================================================
    * GitHub 风格点阵图
-   * days: [{date:Date, minutes:Number}]
-   * opts.thresholds: [t1,t2,t3] 分档阈值（小时）
+   * days: [{date:Date, minutes:Number}]（minutes 为 null 表示未来日期）
+   * 分档：每张图按自身有效数据的 P95 独立建立比例色阶
    * ============================================================ */
-  function heatmap(container, days, opts = {}) {
+  function heatmap(container, days) {
     container.innerHTML = '';
     const cell = 11, gap = 3, rows = 7, left = 30, top = 18;
     const n = days.length;
@@ -58,14 +88,7 @@ const Charts = (() => {
     const cols = Math.ceil((firstDow + n) / rows);
     const W = left + cols * (cell + gap) + 8;
     const H = top + rows * (cell + gap) + 2;
-    const maxH = Math.max(...days.map(d => d.minutes / 60), 0.1);
-    // 默认按分位数分档（与 GitHub 贡献图一致），保证深绿/浅绿/空格自然分布
-    let th = opts.thresholds;
-    if (!th) {
-      const sorted = days.map(d => d.minutes / 60).filter(v => v > 0).sort((a, b) => a - b);
-      const q = p => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : maxH;
-      th = [q(0.35), q(0.62), q(0.86)];
-    }
+    const scale = buildHeatmapScale(days);
 
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'hm-svg' });
     svg.style.width = '100%';
@@ -99,12 +122,7 @@ const Charts = (() => {
         const idx = c * 7 + r - firstDow;
         if (idx < 0 || idx >= n) continue;
         const d = days[idx];
-        const hours = d.minutes / 60;
-        let lv = 0;
-        if (hours > 0) lv = 1;
-        if (hours >= th[0]) lv = 2;
-        if (hours >= th[1]) lv = 3;
-        if (hours >= th[2]) lv = 4;
+        const lv = scale.level(d.minutes);
         const rect = el('rect', {
           x: left + c * (cell + gap), y: top + r * (cell + gap),
           width: cell, height: cell, rx: 2.5,
@@ -132,7 +150,8 @@ const Charts = (() => {
    * ============================================================ */
   function line(container, cfg) {
     container.innerHTML = '';
-    const { labels, values, color, unit } = cfg;
+    const { labels, values, unit } = cfg;
+    const color = safeColor(cfg.color);
     const W = 640, H = cfg.height || 180, P = { l: 38, r: 12, t: 14, b: 24 };
     const n = values.length;
     const max = Math.max(...values, 0.001) * 1.15;
@@ -212,7 +231,7 @@ const Charts = (() => {
       dot.style.opacity = 1;
       if (i !== lastIdx) {   // 仅在数据点变化时重建内容，移动时只重定位
         lastIdx = i;
-        showTip(`<span class="tip-date">${labels[i]}</span><br><b>${values[i]}${unit}</b>`, e.clientX, e.clientY);
+        showTip(`<span class="tip-date">${escapeHTML(labels[i])}</span><br><b>${escapeHTML(values[i])}${escapeHTML(unit)}</b>`, e.clientX, e.clientY);
       } else {
         moveTip(e.clientX, e.clientY);
       }
@@ -234,9 +253,9 @@ const Charts = (() => {
       const row = document.createElement('div');
       row.className = 'hbar-row';
       row.innerHTML = `
-        <div class="hbar-icon">${r.icon}</div>
-        <div class="hbar-name">${r.name}<small>${r.category || ''}</small></div>
-        <div class="hbar-track"><div class="hbar-fill" style="background:${r.color};color:${r.color}"></div></div>
+        <div class="hbar-icon">${escapeHTML(r.icon)}</div>
+        <div class="hbar-name">${escapeHTML(r.name)}<small>${escapeHTML(r.category || '')}</small></div>
+        <div class="hbar-track"><div class="hbar-fill" style="background:${safeColor(r.color)};color:${safeColor(r.color)}"></div></div>
         <div class="hbar-val">${fmtMin(r.minutes)}</div>`;
       row.addEventListener('click', () => onRow(r, row));
       container.appendChild(row);
@@ -262,22 +281,22 @@ const Charts = (() => {
       if (frac <= 0) return;
       const seg = el('circle', {
         cx, cy, r: R, fill: 'none',
-        stroke: r.color, 'stroke-width': 22,
+        stroke: safeColor(r.color), 'stroke-width': 22,
         'stroke-dasharray': `${Math.max(frac * C - 2.5, 0.5)} ${C - frac * C + 2.5}`,
         'stroke-dashoffset': -acc * C,
         transform: `rotate(-90 ${cx} ${cy})`,
-        class: 'pie-seg', style: `color:${r.color}`,
+        class: 'pie-seg', style: `color:${safeColor(r.color)}`,
       });
       const pct = (frac * 100).toFixed(1);
-      seg.addEventListener('mouseenter', e => showTip(`${r.icon} ${r.name}<br><b>${fmtMin(r.minutes)}</b> · ${pct}%`, e.clientX, e.clientY));
+      seg.addEventListener('mouseenter', e => showTip(`${escapeHTML(r.icon)} ${escapeHTML(r.name)}<br><b>${fmtMin(r.minutes)}</b> · ${pct}%`, e.clientX, e.clientY));
       seg.addEventListener('mousemove', e => moveTip(e.clientX, e.clientY));
       seg.addEventListener('mouseleave', hideTip);
       svg.appendChild(seg);
       acc += frac;
 
       const li = document.createElement('li');
-      li.innerHTML = `<span class="pl-dot" style="background:${r.color}"></span>
-        <span class="pl-name">${r.name}</span><span class="pl-pct">${pct}%</span>`;
+      li.innerHTML = `<span class="pl-dot" style="background:${safeColor(r.color)}"></span>
+        <span class="pl-name">${escapeHTML(r.name)}</span><span class="pl-pct">${pct}%</span>`;
       legendEl.appendChild(li);
     });
 
@@ -295,7 +314,8 @@ const Charts = (() => {
    * ============================================================ */
   function vbars(container, cfg) {
     container.innerHTML = '';
-    const { labels, values, color, unit } = cfg;
+    const { labels, values, unit } = cfg;
+    const color = safeColor(cfg.color);
     // 与折线图相同的 640×200 viewBox，保证并排时高度严格对齐
     const W = 640, H = 200, P = { l: 10, r: 10, t: 14, b: 26 };
     const n = values.length;
@@ -316,8 +336,8 @@ const Charts = (() => {
       rect.style.transformOrigin = 'bottom';
       rect.style.transition = 'transform .5s cubic-bezier(.22,.8,.35,1) ' + (i * 55) + 'ms, opacity .2s';
       rect.style.transform = 'scaleY(0)';
-      rect.addEventListener('mouseenter', e => { rect.setAttribute('opacity', 1); showTip(`${labels[i]}<br><b>${v}${unit}</b>`, e.clientX, e.clientY); });
-      rect.addEventListener('mousemove', e => showTip(tip.innerHTML, e.clientX, e.clientY));
+      rect.addEventListener('mouseenter', e => { rect.setAttribute('opacity', 1); showTip(`${escapeHTML(labels[i])}<br><b>${escapeHTML(v)}${escapeHTML(unit)}</b>`, e.clientX, e.clientY); });
+      rect.addEventListener('mousemove', e => moveTip(e.clientX, e.clientY));
       rect.addEventListener('mouseleave', () => { rect.setAttribute('opacity', 0.9); hideTip(); });
       svg.appendChild(rect);
       const tx = el('text', { x: x + bw / 2, y: H - 8, 'text-anchor': 'middle', class: 'lc-axis' });
@@ -332,3 +352,5 @@ const Charts = (() => {
 
   return { init, heatmap, line, hbars, donut, vbars, fmtMin, showTip, hideTip };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { buildHeatmapScale };

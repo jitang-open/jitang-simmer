@@ -3,3 +3,13 @@ Thumbs.db
 Desktop.ini
 *.log
 node_modules/
+
+# 后端运行时产物
+server/node_modules/
+server/data/
+server/config.json
+
+# 采集端编译产物
+collector/SimmerCollector/bin/
+collector/SimmerCollector/obj/
+collector/SimmerCollector.exe

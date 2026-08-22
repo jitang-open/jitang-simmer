@@ -1,0 +1,17 @@
+{
+  "name": "simmer-server",
+  "version": "0.1.0",
+  "description": "Jitang Simmer 中心后端：接收采集端上报、SQLite 存储、聚合查询接口",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.19.2"
+  }
+}
