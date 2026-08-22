@@ -6,13 +6,36 @@
  *  - donut   : 环形占比图
  *  - vbars   : 竖向柱状图（星期分布）
  * ============================================================ */
+/*
+ * 为每张点阵图独立建立比例色阶。
+ * 使用最近秩 P95 作为满色上限，避免极少数异常高值压暗其余日期。
+ */
+function buildHeatmapScale(days) {
+  const values = days
+    .map(day => day && day.minutes)
+    .filter(minutes => Number.isFinite(minutes) && minutes > 0)
+    .sort((a, b) => a - b);
+  const capMinutes = values.length
+    ? values[Math.ceil(values.length * 0.95) - 1]
+    : 0;
+  const thresholds = capMinutes > 0
+    ? Array.from({ length: 8 }, (_, index) => capMinutes * (index + 1) / 8)
+    : [];
+
+  function level(minutes) {
+    if (!Number.isFinite(minutes) || minutes <= 0 || capMinutes <= 0) return 0;
+    let result = 1;
+    thresholds.forEach(threshold => { if (minutes >= threshold) result += 1; });
+    return Math.min(result, 9);
+  }
+
+  return { capMinutes, thresholds, level };
+}
+
 const Charts = (() => {
   const NS = 'http://www.w3.org/2000/svg';
-  // 10 色（空 + 8 档）纯绿梯度，暗 → 亮（#03301a → #39d353 线性插值）
+  // 10 色（空 + 9 档）纯绿梯度，暗 → 亮（#03301a → #39d353 线性插值）
   const LEVELS = ['#161b22', '#03301a', '#0a4421', '#115928', '#176d30', '#1e8237', '#25963e', '#2cab45', '#32bf4c', '#39d353'];
-  // 绝对时长分档（小时）：>0 → 档1，累计达到 0.5/1/1.5/2/2.5/3/3.5/4h → 档2~9；
-  // 全站（总时长与单软件点阵）统一阈值，颜色即强度，4h 顶格
-  const LEVEL_HOURS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
   let tip = null;
   let gradSeq = 0;
   const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -55,7 +78,7 @@ const Charts = (() => {
   /* ============================================================
    * GitHub 风格点阵图
    * days: [{date:Date, minutes:Number}]（minutes 为 null 表示未来日期）
-   * 分档：绝对时长（LEVEL_HOURS），全站统一阈值
+   * 分档：每张图按自身有效数据的 P95 独立建立比例色阶
    * ============================================================ */
   function heatmap(container, days) {
     container.innerHTML = '';
@@ -65,6 +88,7 @@ const Charts = (() => {
     const cols = Math.ceil((firstDow + n) / rows);
     const W = left + cols * (cell + gap) + 8;
     const H = top + rows * (cell + gap) + 2;
+    const scale = buildHeatmapScale(days);
 
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'hm-svg' });
     svg.style.width = '100%';
@@ -98,10 +122,7 @@ const Charts = (() => {
         const idx = c * 7 + r - firstDow;
         if (idx < 0 || idx >= n) continue;
         const d = days[idx];
-        const hours = (d.minutes || 0) / 60;
-        let lv = 0;
-        if (hours > 0) lv = 1;
-        for (let i = 0; i < LEVEL_HOURS.length; i++) if (hours >= LEVEL_HOURS[i]) lv = i + 2;
+        const lv = scale.level(d.minutes);
         const rect = el('rect', {
           x: left + c * (cell + gap), y: top + r * (cell + gap),
           width: cell, height: cell, rx: 2.5,
@@ -331,3 +352,5 @@ const Charts = (() => {
 
   return { init, heatmap, line, hbars, donut, vbars, fmtMin, showTip, hideTip };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { buildHeatmapScale };
