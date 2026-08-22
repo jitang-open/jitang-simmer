@@ -74,6 +74,8 @@ const state = {
   tokenSource: '',                                      // AI Token 来源筛选
   tokenProvider: '',                                    // AI Token provider 筛选
   tokenModel: '',                                       // AI Token 模型筛选
+  usageTrendOpen: false,                                // 总时长趋势默认收起
+  tokenTrendOpen: false,                                // Token 趋势默认收起
 };
 
 const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', total: '累计' };
@@ -87,6 +89,66 @@ const TOKEN_STATUS = {
   error: ['扫描失败', 'bad'],
 };
 const wlIds = () => [...state.whitelist];
+
+/* ---------------- 统一下拉组件（设备 / 年份 / Token / 表单共用） ---------------- */
+function closeCustomSelects(except = null) {
+  document.querySelectorAll('.device-select.open').forEach(select => {
+    if (select === except) return;
+    select.classList.remove('open');
+    select.querySelector('.ds-btn')?.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function mountCustomSelect(wrap, { options, value, onChange, showDot = false, disabled = false }) {
+  if (!wrap) return;
+  const normalized = options.map(option => typeof option === 'object'
+    ? { ...option, key: String(option.value ?? '') }
+    : { value: option, key: String(option), label: String(option) });
+  const selected = normalized.find(option => option.key === String(value ?? '')) || normalized[0];
+  let currentKey = selected?.key || '';
+  wrap.classList.add('device-select');
+  wrap.classList.remove('open');
+  wrap.innerHTML = `
+    <button type="button" class="ds-btn" aria-haspopup="listbox" aria-expanded="false" ${disabled ? 'disabled' : ''}
+      title="${escapeHTML(selected?.label || '')}">
+      ${showDot ? '<span class="sd-dot"></span>' : ''}<span class="ds-name">${escapeHTML(selected?.label || '')}</span><span class="caret">▼</span>
+    </button>
+    <div class="ds-list" role="listbox"></div>`;
+  const button = wrap.querySelector('.ds-btn');
+  const list = wrap.querySelector('.ds-list');
+
+  normalized.forEach(option => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'ds-opt' + (option === selected ? ' sel' : '');
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', option === selected ? 'true' : 'false');
+    item.innerHTML = `${showDot ? '<span class="sd-dot"></span>' : ''}<span class="ds-opt-label">${escapeHTML(option.label)}</span>${option.meta ? `<small>${escapeHTML(option.meta)}</small>` : ''}`;
+    item.addEventListener('click', event => {
+      event.stopPropagation();
+      wrap.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      const changed = option.key !== currentKey;
+      currentKey = option.key;
+      button.querySelector('.ds-name').textContent = option.label;
+      button.title = option.label;
+      list.querySelectorAll('.ds-opt').forEach(candidate => {
+        candidate.classList.toggle('sel', candidate === item);
+        candidate.setAttribute('aria-selected', candidate === item ? 'true' : 'false');
+      });
+      if (changed) onChange(option.value);
+    });
+    list.appendChild(item);
+  });
+
+  button.addEventListener('click', event => {
+    event.stopPropagation();
+    const opening = !wrap.classList.contains('open');
+    closeCustomSelects(wrap);
+    wrap.classList.toggle('open', opening);
+    button.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  });
+}
 
 function formatTokens(value, compact = false) {
   const number = Number(value) || 0;
@@ -212,45 +274,69 @@ function applyMeta(rows) {
 
 /* ---------------- 顶部：设备选择器 ---------------- */
 function buildDeviceSelect() {
-  const wrap = $('#deviceSelect');
   const opts = [{ id: 'all', name: '全部设备', host: '汇总统计' }, ...DB.devices];
-  wrap.innerHTML = `
-    <button class="ds-btn"><span class="sd-dot"></span><span class="ds-name">全部设备</span><span class="caret">▼</span></button>
-    <div class="ds-list"></div>`;
-  const list = wrap.querySelector('.ds-list');
-  opts.forEach(o => {
-    const b = document.createElement('button');
-    b.className = 'ds-opt' + (o.id === state.device ? ' sel' : '');
-    b.innerHTML = `<span class="sd-dot"></span>${escapeHTML(o.name)}<small>${escapeHTML(o.host)}</small>`;
-    b.addEventListener('click', () => {
-      state.device = o.id;
-      wrap.querySelector('.ds-name').textContent = o.name;
-      wrap.classList.remove('open');
-      list.querySelectorAll('.ds-opt').forEach(x => x.classList.remove('sel'));
-      b.classList.add('sel');
-      renderAll();
-    });
-    list.appendChild(b);
+  mountCustomSelect($('#deviceSelect'), {
+    options: opts.map(option => ({ value: option.id, label: option.name, meta: option.host })),
+    value: state.device,
+    showDot: true,
+    onChange: value => { state.device = value; renderAll(); },
   });
-  wrap.querySelector('.ds-btn').addEventListener('click', e => {
-    e.stopPropagation();
-    wrap.classList.toggle('open');
-  });
-  document.addEventListener('click', () => wrap.classList.remove('open'));
 }
 
 /* ---------------- 顶部：每日 / 每周 / 累计 ---------------- */
-function buildRangeTabs() {
-  $('#rangeTabs').querySelectorAll('button').forEach(b => {
-    b.addEventListener('click', () => {
-      state.range = b.dataset.range;
-      $('#rangeTabs').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-      renderAll();
-    });
+function syncRangeTabs() {
+  document.querySelectorAll('[data-range-tabs] button').forEach(button => {
+    button.classList.toggle('on', button.dataset.range === state.range);
   });
 }
 
+function setRange(range) {
+  if (!Object.hasOwn(RANGE_LABEL, range)) return;
+  const changed = state.range !== range;
+  state.range = range;
+  syncRangeTabs();
+  if (changed) renderAll();
+}
+
+function buildRangeTabs() {
+  document.querySelectorAll('[data-range-tabs] button').forEach(button => {
+    button.addEventListener('click', () => setRange(button.dataset.range));
+  });
+  syncRangeTabs();
+}
+
 /* ---------------- 侧边栏：滚动高亮（scroll-spy）+ 移动端抽屉 ---------------- */
+
+const TREND_CONTROLS = {
+  usage: { stateKey: 'usageTrendOpen', target: '#trendWrap' },
+  token: { stateKey: 'tokenTrendOpen', target: '#tokenTrend' },
+};
+
+function syncTrendToggles() {
+  document.querySelectorAll('[data-trend-toggle]').forEach(button => {
+    const control = TREND_CONTROLS[button.dataset.trendToggle];
+    if (!control) return;
+    const open = !!state[control.stateKey];
+    const content = $(control.target);
+    if (content) content.hidden = !open;
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    button.innerHTML = `${open ? '收起趋势' : '展开趋势'} <span class="caret">▼</span>`;
+  });
+}
+
+function buildTrendToggles() {
+  document.querySelectorAll('[data-trend-toggle]').forEach(button => {
+    button.addEventListener('click', () => {
+      const control = TREND_CONTROLS[button.dataset.trendToggle];
+      if (!control) return;
+      state[control.stateKey] = !state[control.stateKey];
+      syncTrendToggles();
+      // 展开后重新绘制，确保隐藏容器恢复时使用真实宽度。
+      if (state[control.stateKey]) renderAll();
+    });
+  });
+  syncTrendToggles();
+}
 function closeDrawer() {
   document.querySelector('.sidebar').classList.remove('open');
   $('#backdrop').classList.remove('show');
@@ -299,31 +385,16 @@ function renderSideDevices() {
 
 /* ---------------- 总时长卡片：年份选择器（与设备选择器同款 UI） ---------------- */
 function buildYearSelect() {
-  const wrap = $('#yearSelect');
   const currentYear = new Date().getFullYear();
-  wrap.innerHTML = `
-    <button class="ds-btn"><span class="ds-name">${currentYear}</span><span class="caret">▼</span></button>
-    <div class="ds-list"></div>`;
-  const list = wrap.querySelector('.ds-list');
-  [...DB.yearList].reverse().forEach(y => {          // 新年份排在上面
-    const b = document.createElement('button');
-    b.className = 'ds-opt' + (y === state.year ? ' sel' : '');
-    b.innerHTML = `${y}<small>${y === currentYear ? '今年' : ''}</small>`;
-    b.addEventListener('click', () => {
-      state.year = y;
-      wrap.querySelector('.ds-name').textContent = y;
-      wrap.classList.remove('open');
-      list.querySelectorAll('.ds-opt').forEach(x => x.classList.remove('sel'));
-      b.classList.add('sel');
-      renderAll();                                  // 点阵图与详情里的年度点阵都随年份联动
-    });
-    list.appendChild(b);
+  mountCustomSelect($('#yearSelect'), {
+    options: [...DB.yearList].reverse().map(year => ({
+      value: year,
+      label: String(year),
+      meta: year === currentYear ? '今年' : '',
+    })),
+    value: state.year,
+    onChange: value => { state.year = value; renderAll(); },
   });
-  wrap.querySelector('.ds-btn').addEventListener('click', e => {
-    e.stopPropagation();
-    wrap.classList.toggle('open');
-  });
-  document.addEventListener('click', () => wrap.classList.remove('open'));
 }
 
 /* ---------------- 概览卡片 ---------------- */
@@ -503,11 +574,15 @@ async function renderPie(ctx, token) {
 }
 
 /* ---------------- AI Token 统计（请求级数字元数据） ---------------- */
-function fillTokenFilter(selector, values, selected, labeler = value => value) {
-  const select = $(selector);
-  select.innerHTML = '<option value="">全部</option>' + values.map(value =>
-    `<option value="${escapeHTML(value)}" ${value === selected ? 'selected' : ''}>${escapeHTML(labeler(value))}</option>`
-  ).join('');
+function fillTokenFilter(selector, values, selected, stateKey, labeler = value => value) {
+  mountCustomSelect($(selector), {
+    options: [
+      { value: '', label: '全部' },
+      ...values.map(value => ({ value, label: labeler(value) })),
+    ],
+    value: selected,
+    onChange: value => { state[stateKey] = value; renderAll(); },
+  });
 }
 
 function renderTokenRanks(container, rows, labeler = value => value) {
@@ -546,9 +621,9 @@ async function renderTokens(ctx, token) {
   state.tokenSource = source;
   state.tokenProvider = provider;
   state.tokenModel = model;
-  fillTokenFilter('#tokenSourceFilter', dimensions.sources, source, value => TOKEN_SOURCE_NAME[value] || value);
-  fillTokenFilter('#tokenProviderFilter', dimensions.providers, provider);
-  fillTokenFilter('#tokenModelFilter', dimensions.models, model);
+  fillTokenFilter('#tokenSourceFilter', dimensions.sources, source, 'tokenSource', value => TOKEN_SOURCE_NAME[value] || value);
+  fillTokenFilter('#tokenProviderFilter', dimensions.providers, provider, 'tokenProvider');
+  fillTokenFilter('#tokenModelFilter', dimensions.models, model, 'tokenModel');
 
   const filters = { source, provider, model };
   const [summary, trend, year, sourceRows, modelRows, statuses] = await Promise.all([
@@ -696,10 +771,44 @@ function renderWhitelist() {
 }
 
 /* ---------------- 添加 / 编辑软件对话框 ---------------- */
+function confirmAction({ title, message, confirmText = '确认' }) {
+  return new Promise(resolve => {
+    document.querySelector('.confirm-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'app-form-overlay confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+        <div class="confirm-mark">!</div>
+        <div class="confirm-copy">
+          <h3 id="confirmTitle">${escapeHTML(title)}</h3>
+          <p id="confirmMessage">${escapeHTML(message)}</p>
+        </div>
+        <div class="confirm-btns">
+          <button type="button" class="btn-ghost confirm-cancel">取消</button>
+          <button type="button" class="btn-ghost confirm-submit">${escapeHTML(confirmText)}</button>
+        </div>
+      </div>`;
+    let settled = false;
+    const finish = accepted => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKeydown);
+      overlay.remove();
+      resolve(accepted);
+    };
+    const onKeydown = event => { if (event.key === 'Escape') finish(false); };
+    overlay.querySelector('.confirm-cancel').addEventListener('click', () => finish(false));
+    overlay.querySelector('.confirm-submit').addEventListener('click', () => finish(true));
+    overlay.addEventListener('click', event => { if (event.target === overlay) finish(false); });
+    document.addEventListener('keydown', onKeydown);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.querySelector('.confirm-cancel').focus());
+  });
+}
+
 async function openAppForm(editing) {
-  document.querySelectorAll('.app-form-overlay').forEach(d => d.remove());
+  document.querySelectorAll('.app-form-overlay').forEach(dialog => dialog.remove());
   const isEdit = !!editing;
-  // 新添加时默认随机一个颜色（用户可再点 🎲 换或手选）；编辑时保持原色
   const def = isEdit
     ? editing
     : { id: '', name: '', category: '其他', color: PALETTE[Math.floor(Math.random() * PALETTE.length)] };
@@ -707,26 +816,34 @@ async function openAppForm(editing) {
   // 已观测进程清单（后端记录过的所有 exe，不受白名单限制）
   let known = [];
   try { known = await DB.allApps(); } catch (e) {}
-  const knownMap = new Map(known.map(k => [k.id.toLowerCase(), k]));
+  const knownRows = [...known].sort((a, b) => String(a.id).localeCompare(String(b.id), 'zh-CN'));
+  const knownMap = new Map(knownRows.map(row => [String(row.id).toLowerCase(), row]));
+  const listedIds = new Set(mergedApps().map(app => app.id.toLowerCase()));
 
   const overlay = document.createElement('div');
   overlay.className = 'app-form-overlay';
   overlay.innerHTML = `
-    <div class="app-form">
-      <h3>${isEdit ? '编辑软件' : '添加软件'}</h3>
-      <label>进程<span class="req">*</span><span class="hint-inline">（从检测到的进程中选择，或手动输入）</span></label>
-      <input class="af-id" list="af-proc-list" placeholder="点击选择已检测到的进程…" value="${escapeHTML(isEdit ? editing.id : '')}" ${isEdit ? 'readonly title="如需更换进程，请删除后重新添加"' : 'autofocus'}>
-      <datalist id="af-proc-list">${known.map(k => {
-        const cur = mergedApps().some(a => a.id === k.id);
-        return `<option value="${escapeHTML(k.id)}" label="${cur ? '已在清单' : '未添加'} · 累计 ${Number(k.minutes) || 0} 分钟"></option>`;
-      }).join('')}</datalist>
+    <div class="app-form" role="dialog" aria-modal="true" aria-labelledby="appFormTitle">
+      <h3 id="appFormTitle">${isEdit ? '编辑软件' : '添加软件'}</h3>
+      <label>进程<span class="req">*</span><span class="hint-inline">（选择已检测进程，或搜索后手动使用）</span></label>
+      <input type="hidden" class="af-id" value="${escapeHTML(isEdit ? editing.id : '')}">
+      <div class="device-select af-process-select${isEdit ? ' is-disabled' : ''}">
+        <button type="button" class="ds-btn" aria-haspopup="listbox" aria-expanded="false" ${isEdit ? 'disabled title="如需更换进程，请删除后重新添加"' : ''}>
+          <span class="ds-name">${escapeHTML(isEdit ? editing.id : '点击选择已检测到的进程…')}</span><span class="caret">▼</span>
+        </button>
+        <div class="ds-list" role="listbox">
+          <div class="af-process-search-wrap"><input class="af-process-search" autocomplete="off" placeholder="搜索进程，或输入进程名…"></div>
+          <div class="af-process-options"></div>
+        </div>
+      </div>
       <label>显示名称<span class="hint-inline">（留空则用进程名）</span></label>
       <input class="af-name" placeholder="如 Google Chrome" value="${escapeHTML(isEdit ? editing.name : '')}">
       <label>软件类型</label>
-      <select class="af-cat">${CATEGORIES.map(c => `<option ${c === def.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
+      <input type="hidden" class="af-cat" value="${escapeHTML(def.category)}">
+      <div class="device-select af-cat-select"></div>
       <label>颜色</label>
-      <div class="af-palette">${PALETTE.map(c =>
-        `<i class="cp-item ${c === def.color ? 'sel' : ''}" data-color="${c}" style="background:${c}"></i>`).join('')}<i class="cp-item cp-random" title="随机一个颜色">🎲</i></div>
+      <div class="af-palette">${PALETTE.map(color =>
+        `<i class="cp-item ${color === def.color ? 'sel' : ''}" data-color="${color}" style="background:${color}"></i>`).join('')}<i class="cp-item cp-random" title="随机一个颜色">🎲</i></div>
       <div class="af-btns">
         <button class="btn-ghost af-cancel">取消</button>
         <button class="btn-ghost af-save" style="border-color:var(--green);color:var(--green-hi)">${isEdit ? '保存' : '添加'}</button>
@@ -735,45 +852,117 @@ async function openAppForm(editing) {
 
   const idInput = overlay.querySelector('.af-id');
   const nameInput = overlay.querySelector('.af-name');
-  const catSelect = overlay.querySelector('.af-cat');
+  const catInput = overlay.querySelector('.af-cat');
+  const processSelect = overlay.querySelector('.af-process-select');
+  const processButton = processSelect.querySelector('.ds-btn');
+  const processSearch = overlay.querySelector('.af-process-search');
+  const processOptions = overlay.querySelector('.af-process-options');
   let pickedColor = def.color;
-
-  // 选中已知进程时，若显示名仍为空则自动带出（进程名去扩展名）
-  idInput.addEventListener('change', () => {
-    const k = knownMap.get(idInput.value.trim().toLowerCase());
-    if (k && !nameInput.value.trim()) nameInput.value = k.id.replace(/\.exe$/i, '');
-    idInput.classList.remove('af-invalid');
-  });
-  // 分类切换时若未手动选过颜色，跟随分类默认色
   let colorTouched = isEdit;
-  catSelect.addEventListener('change', () => {
-    if (!colorTouched) {
-      pickedColor = CAT_META[catSelect.value].color;
-      overlay.querySelectorAll('.cp-item').forEach(i => i.classList.toggle('sel', i.dataset.color === pickedColor));
+
+  const pickProcess = processId => {
+    const value = String(processId || '').trim();
+    if (!value) return;
+    const knownRow = knownMap.get(value.toLowerCase());
+    const canonicalId = knownRow ? knownRow.id : value;
+    idInput.value = canonicalId;
+    processButton.querySelector('.ds-name').textContent = canonicalId;
+    processButton.title = canonicalId;
+    processButton.classList.remove('af-invalid');
+    processSelect.classList.remove('open');
+    processButton.setAttribute('aria-expanded', 'false');
+    if (knownRow && !nameInput.value.trim()) nameInput.value = canonicalId.replace(/\.exe$/i, '');
+  };
+
+  const addProcessOption = (processId, detail, manual = false) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'ds-opt' + (manual ? ' af-process-manual' : '');
+    option.innerHTML = `<span class="ds-opt-label">${escapeHTML(manual ? `手动使用 “${processId}”` : processId)}</span><small>${escapeHTML(detail)}</small>`;
+    option.addEventListener('click', event => {
+      event.stopPropagation();
+      pickProcess(processId);
+    });
+    processOptions.appendChild(option);
+  };
+
+  const renderProcessOptions = (query = '') => {
+    const keyword = query.trim().toLowerCase();
+    const matches = knownRows.filter(row => !keyword || String(row.id).toLowerCase().includes(keyword));
+    processOptions.innerHTML = '';
+    matches.forEach(row => {
+      const minutes = Math.round(Number(row.minutes) || 0).toLocaleString('zh-CN');
+      const listed = listedIds.has(String(row.id).toLowerCase());
+      addProcessOption(row.id, `${listed ? '已在清单' : '未添加'} · 累计 ${minutes} 分钟`);
+    });
+    const exact = keyword && knownMap.has(keyword);
+    if (keyword && !exact) addProcessOption(query.trim(), '手动添加进程', true);
+    if (!matches.length && !keyword) {
+      processOptions.innerHTML = '<div class="af-process-empty">尚未检测到进程，可在上方直接输入进程名</div>';
     }
+  };
+
+  if (!isEdit) {
+    renderProcessOptions();
+    processButton.addEventListener('click', event => {
+      event.stopPropagation();
+      const opening = !processSelect.classList.contains('open');
+      closeCustomSelects(processSelect);
+      processSelect.classList.toggle('open', opening);
+      processButton.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      if (opening) {
+        processSearch.value = '';
+        renderProcessOptions();
+        setTimeout(() => processSearch.focus(), 0);
+      }
+    });
+    processSelect.querySelector('.ds-list').addEventListener('click', event => event.stopPropagation());
+    processSearch.addEventListener('input', () => renderProcessOptions(processSearch.value));
+    processSearch.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      const value = processSearch.value.trim();
+      if (value) pickProcess(knownMap.get(value.toLowerCase())?.id || value);
+    });
+  }
+
+  mountCustomSelect(overlay.querySelector('.af-cat-select'), {
+    options: CATEGORIES.map(category => ({ value: category, label: category })),
+    value: def.category,
+    onChange: category => {
+      catInput.value = category;
+      if (!colorTouched) {
+        pickedColor = CAT_META[category].color;
+        overlay.querySelectorAll('.cp-item').forEach(item => item.classList.toggle('sel', item.dataset.color === pickedColor));
+      }
+    },
   });
-  overlay.querySelectorAll('.cp-item:not(.cp-random)').forEach(i => i.addEventListener('click', () => {
+
+  overlay.querySelectorAll('.cp-item:not(.cp-random)').forEach(item => item.addEventListener('click', () => {
     colorTouched = true;
-    pickedColor = i.dataset.color;
-    overlay.querySelectorAll('.cp-item').forEach(x => x.classList.toggle('sel', x === i));
+    pickedColor = item.dataset.color;
+    overlay.querySelectorAll('.cp-item').forEach(option => option.classList.toggle('sel', option === item));
   }));
-  // 🎲 随机颜色：从色板随机挑一个并高亮
   overlay.querySelector('.cp-random').addEventListener('click', () => {
     colorTouched = true;
-    const pick = overlay.querySelectorAll('.cp-item:not(.cp-random)');
-    const chosen = pick[Math.floor(Math.random() * pick.length)];
+    const colors = overlay.querySelectorAll('.cp-item:not(.cp-random)');
+    const chosen = colors[Math.floor(Math.random() * colors.length)];
     pickedColor = chosen.dataset.color;
-    overlay.querySelectorAll('.cp-item').forEach(x => x.classList.toggle('sel', x === chosen));
+    overlay.querySelectorAll('.cp-item').forEach(option => option.classList.toggle('sel', option === chosen));
   });
   overlay.querySelector('.af-cancel').addEventListener('click', () => overlay.remove());
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', event => { if (event.target === overlay) overlay.remove(); });
 
   overlay.querySelector('.af-save').addEventListener('click', () => {
     const id = idInput.value.trim();
-    if (!id) { idInput.classList.add('af-invalid'); idInput.focus(); return; }
-    const category = catSelect.value;
+    if (!id) {
+      processButton.classList.add('af-invalid');
+      processButton.focus();
+      return;
+    }
+    const category = catInput.value;
     const meta = CAT_META[category];
-    state.customApps = state.customApps.filter(c => c.id !== id && c.id !== (isEdit ? editing.id : ''));
+    state.customApps = state.customApps.filter(app => app.id !== id && app.id !== (isEdit ? editing.id : ''));
     state.customApps.push({
       id,
       name: nameInput.value.trim() || id.replace(/\.exe$/i, ''),
@@ -790,9 +979,8 @@ async function openAppForm(editing) {
   });
 
   document.body.appendChild(overlay);
-  if (!isEdit) idInput.focus();
+  (isEdit ? nameInput : processButton).focus();
 }
-
 /* ---------------- 总渲染入口 ---------------- */
 async function renderAll() {
   const token = ++renderGeneration;
@@ -812,6 +1000,7 @@ async function renderAll() {
 document.addEventListener('DOMContentLoaded', async () => {
   Charts.init();
   buildRangeTabs();
+  buildTrendToggles();
   buildSidebar();
 
   // 启动自检：存储与内存状态不一致时在控制台报错（防静默丢失不可见，便于排查）
@@ -874,17 +1063,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('.main').prepend(banner);
   }
 
+  document.addEventListener('click', () => closeCustomSelects());
   buildDeviceSelect();
   buildYearSelect();
   renderSideDevices();
-  [
-    ['#tokenSourceFilter', 'tokenSource'],
-    ['#tokenProviderFilter', 'tokenProvider'],
-    ['#tokenModelFilter', 'tokenModel'],
-  ].forEach(([selector, key]) => $(selector).addEventListener('change', event => {
-    state[key] = event.target.value;
-    renderAll();
-  }));
   renderAll();
 
   $('#wlAdd').addEventListener('click', () => openAppForm(null));
@@ -893,5 +1075,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     saveWhitelist(); saveAppsState();
     renderAll();
   });
-  $('#wlNone').addEventListener('click', () => { state.whitelist.clear(); saveWhitelist(); renderAll(); });
+  $('#wlNone').addEventListener('click', async () => {
+    const count = state.whitelist.size;
+    if (!count) return;
+    const accepted = await confirmAction({
+      title: '确认清空白名单？',
+      message: `将停止统计并清空当前 ${count} 款启用软件。历史使用数据不会被删除，之后仍可重新添加。`,
+      confirmText: '确认清空',
+    });
+    if (!accepted) return;
+    state.whitelist.clear();
+    saveWhitelist();
+    renderAll();
+  });
 });
