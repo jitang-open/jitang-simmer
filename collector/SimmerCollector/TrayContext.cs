@@ -16,6 +16,7 @@ internal class TrayContext : ApplicationContext
     private readonly Control _uiSync = new Control();   // 专用隐藏控件：为后台线程提供 UI 调度句柄
     private readonly System.Threading.Timer _sampleTimer;
     private readonly System.Threading.Timer _uploadTimer;
+    private readonly SemaphoreSlim _uploadLock = new(1, 1);
 
     private bool _paused;
     private volatile bool _sessionLocked;
@@ -58,13 +59,19 @@ internal class TrayContext : ApplicationContext
         // 采样定时器：每 2 秒（回调异常不得拖垮进程）
         _sampleTimer = new System.Threading.Timer(_ => Safe(Sample), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
         // 上报定时器：每分钟检查，间隔到达或队列过长时触发
-        _uploadTimer = new System.Threading.Timer(_ => Safe(async () => await UploadDue()), null,
+        _uploadTimer = new System.Threading.Timer(_ => _ = UploadDueSafeAsync(), null,
             TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
     }
 
     private static void Safe(Action fn)
     {
         try { fn(); } catch { /* 定时器线程异常不得终止进程 */ }
+    }
+
+    private async Task UploadDueSafeAsync()
+    {
+        try { await UploadDue(); }
+        catch (Exception ex) { Log.Write("定时上报异常: " + ex.Message); }
     }
 
     /* ---------------- 采样与聚合 ---------------- */
@@ -88,20 +95,37 @@ internal class TrayContext : ApplicationContext
 
     private async Task UploadNow()
     {
-        var batch = _store.Peek(2000);
-        if (batch.Count == 0) { UpdateTooltip("队列为空"); return; }
-
-        _lastUpload = DateTime.Now;
-        bool ok = await Uploader.FlushAsync(_cfg, batch);
-        if (ok)
+        if (!await _uploadLock.WaitAsync(0))
         {
-            _store.Dequeue(batch.Count);
-            _lastSuccess = DateTime.Now;
-            UpdateTooltip($"已上报 {batch.Count} 条");
+            UpdateTooltip("已有上报任务进行中");
+            return;
         }
-        else
+        try
         {
-            UpdateTooltip($"上报失败（队列保留 {_store.Count} 条）");
+            var batch = _store.Peek(2000);
+            if (batch.Count == 0) { UpdateTooltip("队列为空"); return; }
+
+            _lastUpload = DateTime.Now;
+            bool ok = await Uploader.FlushAsync(_cfg, batch);
+            if (ok)
+            {
+                _store.Dequeue(batch.Count);
+                _lastSuccess = DateTime.Now;
+                UpdateTooltip($"已上报 {batch.Count} 条");
+            }
+            else
+            {
+                UpdateTooltip($"上报失败（队列保留 {_store.Count} 条）");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write("上报处理异常: " + ex.Message);
+            UpdateTooltip($"上报异常（队列保留 {_store.Count} 条）");
+        }
+        finally
+        {
+            _uploadLock.Release();
         }
     }
 
@@ -109,7 +133,11 @@ internal class TrayContext : ApplicationContext
     {
         string text = $"Simmer 采集器 · {(_paused ? "已暂停" : "运行中")}\n{state}";
         if (text.Length > 63) text = text.Substring(0, 63);
-        if (_uiSync.IsHandleCreated) _uiSync.BeginInvoke(() => _tray.Text = text);
+        if (!_uiSync.IsDisposed && _uiSync.IsHandleCreated)
+        {
+            try { _uiSync.BeginInvoke(() => _tray.Text = text); }
+            catch (InvalidOperationException) { /* 应用退出期间忽略 UI 更新 */ }
+        }
     }
 
     /* ---------------- 菜单动作 ---------------- */

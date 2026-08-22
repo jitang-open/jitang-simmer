@@ -28,7 +28,7 @@ GitHub Contributions 式点阵图 × Spotify 深色绿色系 · 纯前端零依�
 collector/（C# 采集端·每台电脑） ──上报──▶ server/（Node 后端·SQLite） ◀──查询── 前端（本仓库根目录）
 ```
 
-1. **启动后端**：`cd server && npm install && npm start` → `http://localhost:8788`（首启自动生成 `config.json` 含上报 token）
+1. **启动后端**：使用 Node.js 22，执行 `cd server && npm install && npm start` → `http://localhost:8788`（首启自动生成 `config.json` 含上报 token）
 2. **启动采集端**：`cd collector/SimmerCollector && dotnet build -c Release`，运行 `bin/Release/net8.0-windows/SimmerCollector.exe`，托盘右键「设置」填入 Token（无后端时前端自动回退演示数据）
 3. **查看面板**：直接访问 `http://localhost:8788/index.html`（顶栏显示 ● 实时数据）
 

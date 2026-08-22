@@ -31,9 +31,13 @@ function scope(device, apps, extraSql = '') {
   } else {
     sql += ' AND 0';   // 没有任何设备时直接空结果
   }
-  if (apps && apps.length) {
-    sql += ` AND app IN (${apps.map(() => '?').join(',')})`;
-    params.push(...apps);
+  if (apps !== undefined) {
+    if (apps.length) {
+      sql += ` AND app IN (${apps.map(() => '?').join(',')})`;
+      params.push(...apps);
+    } else {
+      sql += ' AND 0';   // 显式空白名单：不能退化为“全部软件”
+    }
   }
   return { sql: sql + extraSql, params };
 }
@@ -116,7 +120,11 @@ function appTotals(device, apps, range) {
   if (!ids.length) return [];
   const devFilter = ` AND device_id IN (${ids.map(() => '?').join(',')})`;
   base.push(...ids);
-  if (apps && apps.length) { appFilter = ` AND app IN (${apps.map(() => '?').join(',')})`; base.push(...apps); }
+  if (apps !== undefined) {
+    if (!apps.length) return [];
+    appFilter = ` AND app IN (${apps.map(() => '?').join(',')})`;
+    base.push(...apps);
+  }
 
   const rows = db.prepare(
     `SELECT app, COUNT(*) AS minutes FROM usage_minutes WHERE 1=1 ${devFilter} ${appFilter} ${dayFilter} GROUP BY app ORDER BY minutes DESC`
@@ -134,20 +142,26 @@ function appWeekday(device, app) {
      WHERE device_id IN (${ids.map(() => '?').join(',')}) AND app=?
      GROUP BY w`
   ).all(...ids, app);
-  // 天数分母：该软件出现过的日期里各星期的天数
-  const days = db.prepare(
-    `SELECT strftime('%w', substr(ts,1,10)) AS w, COUNT(DISTINCT substr(ts,1,10)) AS d
+  // 分母使用各设备完整的已观测日期范围，包含该软件零使用的日期，与 MockDB 语义一致。
+  const ranges = db.prepare(
+    `SELECT device_id, MIN(substr(ts,1,10)) AS min_day, MAX(substr(ts,1,10)) AS max_day
      FROM usage_minutes
-     WHERE device_id IN (${ids.map(() => '?').join(',')}) AND app=?
-     GROUP BY w`
-  ).all(...ids, app);
-  const dmap = new Map(days.map(r => [r.w, r.d]));
+     WHERE device_id IN (${ids.map(() => '?').join(',')})
+     GROUP BY device_id`
+  ).all(...ids);
+  const dayCounts = Array(7).fill(0);
+  for (const range of ranges) {
+    const end = new Date(range.max_day + 'T00:00:00');
+    for (let d = new Date(range.min_day + 'T00:00:00'); d <= end; d.setDate(d.getDate() + 1)) {
+      dayCounts[d.getDay()]++;
+    }
+  }
   const wmap = new Map(rows.map(r => [r.w, r.m]));
   const order = [1, 2, 3, 4, 5, 6, 0];
   const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   return {
     labels: order.map(w => names[w]),
-    values: order.map(w => Math.round((wmap.get(String(w)) || 0) / Math.max(1, dmap.get(String(w)) || 1))),
+    values: order.map(w => Math.round((wmap.get(String(w)) || 0) / Math.max(1, dayCounts[w]))),
   };
 }
 

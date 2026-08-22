@@ -4,6 +4,10 @@
  *  - 所有统计均基于白名单过滤后实时重算
  * ============================================================ */
 const $ = s => document.querySelector(s);
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
+const safeColor = value => /^#[0-9a-f]{6}$/i.test(String(value)) ? String(value) : '#8b949e';
+
 
 let DB = MockDB;   // 启动时尝试切换为 LiveDB（见 DOMContentLoaded）
 
@@ -123,7 +127,7 @@ function buildDeviceSelect() {
   opts.forEach(o => {
     const b = document.createElement('button');
     b.className = 'ds-opt' + (o.id === state.device ? ' sel' : '');
-    b.innerHTML = `<span class="sd-dot"></span>${o.name}<small>${o.host}</small>`;
+    b.innerHTML = `<span class="sd-dot"></span>${escapeHTML(o.name)}<small>${escapeHTML(o.host)}</small>`;
     b.addEventListener('click', () => {
       state.device = o.id;
       wrap.querySelector('.ds-name').textContent = o.name;
@@ -195,7 +199,7 @@ function renderSideDevices() {
   $('#sideDevices').innerHTML = '<div class="side-dev-title">我的设备</div>' + DB.devices.map(d => `
     <div class="side-dev">
       <span class="sd-dot"></span>
-      <div><div class="sd-name">${d.name}</div><div class="sd-host">${d.host}</div></div>
+      <div><div class="sd-name">${escapeHTML(d.name)}</div><div class="sd-host">${escapeHTML(d.host)}</div></div>
     </div>`).join('');
 }
 
@@ -229,24 +233,36 @@ function buildYearSelect() {
 }
 
 /* ---------------- 概览卡片 ---------------- */
-async function renderOverview() {
-  const ids = wlIds();
-  const totalMin = await DB.rangeTotalMinutes(state.device, ids, state.range);
-  const activeApps = (await DB.appTotals(state.device, ids, state.range)).filter(r => r.minutes > 0).length;
-  const cpu = await DB.metricCurrent(state.device, 'cpu');
-  const tempCpu = await DB.metricCurrent(state.device, 'cpuTemp');
-  const tempGpu = await DB.metricCurrent(state.device, 'gpuTemp');
-  const power = await DB.metricCurrent(state.device, 'power');
+let renderGeneration = 0;
+const snapshotRenderState = () => ({
+  device: state.device,
+  range: state.range,
+  year: state.year,
+  appIds: wlIds(),
+});
+const isRenderCurrent = token => token === renderGeneration;
+
+async function renderOverview(ctx, token) {
+  const [totalMin, totalRows, cpu, tempCpu, tempGpu, power] = await Promise.all([
+    DB.rangeTotalMinutes(ctx.device, ctx.appIds, ctx.range),
+    DB.appTotals(ctx.device, ctx.appIds, ctx.range),
+    DB.metricCurrent(ctx.device, 'cpu'),
+    DB.metricCurrent(ctx.device, 'cpuTemp'),
+    DB.metricCurrent(ctx.device, 'gpuTemp'),
+    DB.metricCurrent(ctx.device, 'power'),
+  ]);
+  if (!isRenderCurrent(token)) return;
+  const activeApps = totalRows.filter(r => r.minutes > 0).length;
   const hwReady = cpu !== null;
   const temp = tempCpu !== null && tempGpu !== null ? ((tempCpu + tempGpu) / 2).toFixed(1) : null;
 
   const th = Math.floor(totalMin / 60), tm = Math.round(totalMin % 60);
   const cards = [
-    { label: RANGE_LABEL[state.range] + '总时长', value: `${th}<small> 小时 </small>${tm}<small> 分</small>`, extra: `白名单内 ${ids.length} 款软件`, icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm1 10.6l4.2 2.5-.8 1.3L11 13.5V7h2v5.6z' },
-    { label: '活跃软件', value: activeApps + ' <small>款</small>', extra: RANGE_LABEL[state.range] + '内有使用记录', icon: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
+    { label: RANGE_LABEL[ctx.range] + '总时长', value: `${th}<small> 小时 </small>${tm}<small> 分</small>`, extra: `白名单内 ${ctx.appIds.length} 款软件`, icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm1 10.6l4.2 2.5-.8 1.3L11 13.5V7h2v5.6z' },
+    { label: '活跃软件', value: activeApps + ' <small>款</small>', extra: RANGE_LABEL[ctx.range] + '内有使用记录', icon: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
     { label: 'CPU 占用', value: hwReady ? cpu + ' <small>%</small>' : '—', extra: hwReady ? '当前时刻 · 实时采集' : '待 M1.5 硬件采集支持', icon: 'M9 9h6v6H9zM12 1v4M12 19v4M1 12h4M19 12h4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M19.8 4.2L17 7M7 17l-2.8 2.8' },
     { label: '核心温度', value: temp !== null ? temp + ' <small>°C</small>' : '—', extra: temp !== null ? 'CPU / GPU 平均' : '待 M1.5 硬件采集支持', icon: 'M14 14.8V5a2 2 0 10-4 0v9.8a4.5 4.5 0 104 0z' },
-    { label: '整机功耗', value: power !== null ? power + ' <small>W</small>' : '—', extra: power !== null ? (state.device === 'all' ? '全部设备合计' : '当前设备') : '待 M1.5 硬件采集支持', icon: 'M13 2L4 14h6v8l9-12h-6V2z' },
+    { label: '整机功耗', value: power !== null ? power + ' <small>W</small>' : '—', extra: power !== null ? (ctx.device === 'all' ? '全部设备合计' : '当前设备') : '待 M1.5 硬件采集支持', icon: 'M13 2L4 14h6v8l9-12h-6V2z' },
   ];
 
   $('#sec-overview').innerHTML = cards.map(c => `
@@ -258,18 +274,18 @@ async function renderOverview() {
 }
 
 /* ---------------- 总时长：点阵图 + 趋势折线 ---------------- */
-async function renderTotal() {
-  const ids = wlIds();
-  const year = await DB.yearSeries(state.device, ids, state.year);
+async function renderTotal(ctx, token) {
+  const [year, trend] = await Promise.all([
+    DB.yearSeries(ctx.device, ctx.appIds, ctx.year),
+    DB.trendSeries(ctx.device, ctx.appIds, ctx.range),
+  ]);
+  if (!isRenderCurrent(token)) return;
   const totalMin = year.reduce((s, d) => s + (d.minutes || 0), 0);
   const activeDays = year.filter(d => d.minutes > 0).length;
   $('#totalSub').textContent =
-    `${state.year} 年共 ${Math.floor(totalMin / 60).toLocaleString()} 小时 · ${activeDays} 天有使用记录 · 仅统计白名单软件`;
-
+    `${ctx.year} 年共 ${Math.floor(totalMin / 60).toLocaleString()} 小时 · ${activeDays} 天有使用记录 · 仅统计白名单软件`;
   Charts.heatmap($('#heatmapWrap'), year);
-
-  const trend = await DB.trendSeries(state.device, ids, state.range);
-  $('#trendHint').textContent = { daily: '今日 24 小时分布', weekly: '近 7 天每日合计', total: '近 12 个月每月合计' }[state.range];
+  $('#trendHint').textContent = { daily: '今日 24 小时分布', weekly: '近 7 天每日合计', total: '近 12 个月每月合计' }[ctx.range];
   Charts.line($('#trendWrap'), {
     labels: trend.labels, values: trend.values,
     color: '#1db954', unit: ' h', height: 180,
@@ -279,9 +295,10 @@ async function renderTotal() {
 /* ---------------- 软件时长：横向柱状图 + 展开详情（>10 折叠） ---------------- */
 const COLLAPSE_AT = 10;   // 超过 10 款软件时默认折叠
 
-async function renderApps() {
-  const rows = applyMeta(await DB.appTotals(state.device, wlIds(), state.range));
-  $('#appsSub').textContent = `${RANGE_LABEL[state.range]} · ${rows.length} 款白名单软件 · 按时长降序`;
+async function renderApps(ctx, token) {
+  const rows = applyMeta(await DB.appTotals(ctx.device, ctx.appIds, ctx.range));
+  if (!isRenderCurrent(token)) return;
+  $('#appsSub').textContent = `${RANGE_LABEL[ctx.range]} · ${rows.length} 款白名单软件 · 按时长降序`;
   const wrap = $('#appBars');
 
   const drawList = (list, collapsed) => {
@@ -312,10 +329,10 @@ async function renderApps() {
     if (idx < 0) {
       state.openApp = null;                         // 该软件已不在白名单内
     } else if (idx < COLLAPSE_AT) {
-      void openDetail(rows[idx], wrap.querySelectorAll('.hbar-row')[idx]);
+      void openDetail(rows[idx], wrap.querySelectorAll('.hbar-row')[idx], ctx, token);
     } else {
       drawList(rows, false);                        // 展开的软件在折叠区，先展开完整列表
-      void openDetail(rows[idx], wrap.querySelectorAll('.hbar-row')[idx]);
+      void openDetail(rows[idx], wrap.querySelectorAll('.hbar-row')[idx], ctx, token);
     }
   }
 
@@ -325,10 +342,10 @@ async function renderApps() {
       state.openApp = null;
       return;
     }
-    void openDetail(app, rowEl);
+    void openDetail(app, rowEl, snapshotRenderState(), renderGeneration);
   }
 
-  async function openDetail(app, rowEl) {
+  async function openDetail(app, rowEl, detailCtx, detailToken) {
     document.querySelectorAll('.app-detail').forEach(d => d.remove());
     state.openApp = app.id;
     const detail = document.createElement('div');
@@ -336,33 +353,37 @@ async function renderApps() {
     detail.innerHTML = `
       <div class="ad-grid">
         <div class="ad-panel">
-          <div class="ad-title"><i style="background:${app.color}"></i>柱状图 · 星期分布</div>
+          <div class="ad-title"><i style="background:${safeColor(app.color)}"></i>柱状图 · 星期分布</div>
           <div class="ad-body"></div>
         </div>
         <div class="ad-panel">
-          <div class="ad-title"><i style="background:${app.color}"></i>折线图 · 时长趋势</div>
+          <div class="ad-title"><i style="background:${safeColor(app.color)}"></i>折线图 · 时长趋势</div>
           <div class="ad-body"></div>
         </div>
         <div class="ad-panel ad-wide">
-          <div class="ad-title"><i style="background:${app.color}"></i>点阵图 · 年度记录</div>
+          <div class="ad-title"><i style="background:${safeColor(app.color)}"></i>点阵图 · 年度记录</div>
           <div class="ad-body"></div>
         </div>
       </div>`;
     rowEl.after(detail);
 
+    const [wd, t, yearRows] = await Promise.all([
+      DB.appWeekday(detailCtx.device, app.id),
+      DB.trendSeries(detailCtx.device, [app.id], detailCtx.range),
+      DB.yearSeries(detailCtx.device, [app.id], detailCtx.year),
+    ]);
+    if (!isRenderCurrent(detailToken) || !detail.isConnected || state.openApp !== app.id) return;
     const bodies = detail.querySelectorAll('.ad-body');
-    const wd = await DB.appWeekday(state.device, app.id);
     Charts.vbars(bodies[0], { labels: wd.labels, values: wd.values, color: app.color, unit: ' 分钟（日均）' });
-    const t = await DB.trendSeries(state.device, [app.id], state.range);
     Charts.line(bodies[1], { labels: t.labels, values: t.values, color: app.color, unit: ' h', height: 200 });
-    const yearRows = await DB.yearSeries(state.device, [app.id], state.year);
     Charts.heatmap(bodies[2], yearRows);
   }
 }
 
 /* ---------------- 饼图（图例 >10 折叠） ---------------- */
-async function renderPie() {
-  const rows = (await DB.appTotals(state.device, wlIds(), state.range)).filter(r => r.minutes > 0);
+async function renderPie(ctx, token) {
+  const rows = (await DB.appTotals(ctx.device, ctx.appIds, ctx.range)).filter(r => r.minutes > 0);
+  if (!isRenderCurrent(token)) return;
   Charts.donut($('#pieWrap'), $('#pieLegend'), applyMeta(rows));
 
   const legend = $('#pieLegend');
@@ -385,29 +406,33 @@ async function renderPie() {
 }
 
 /* ---------------- 硬件监控 ---------------- */
-async function renderHardware() {
+async function renderHardware(ctx, token) {
   const grid = $('#hwGrid');
-  grid.innerHTML = '';
   if (!DB.metricDefs.length) {                      // M1 无硬件采集，M1.5（CAP-06）补齐
-    grid.innerHTML = '<div class="hw-empty">硬件指标采集将在 M1.5（CAP-06，基于 LibreHardwareMonitor）接入</div>';
+    if (isRenderCurrent(token)) grid.innerHTML = '<div class="hw-empty">硬件指标采集将在 M1.5（CAP-06，基于 LibreHardwareMonitor）接入</div>';
     return;
   }
-  for (const m of DB.metricDefs) {
-    const cur = await DB.metricCurrent(state.device, m.id);
+  const metrics = await Promise.all(DB.metricDefs.map(async m => ({
+    m,
+    cur: await DB.metricCurrent(ctx.device, m.id),
+    series: await DB.metricSeries(ctx.device, m.id, ctx.range),
+  })));
+  if (!isRenderCurrent(token)) return;
+  grid.innerHTML = '';
+  metrics.forEach(({ m, cur, series }) => {
     const card = document.createElement('div');
     card.className = 'hw-card';
     card.innerHTML = `
       <div class="hw-head">
-        <span class="hw-name"><i style="background:${m.color}"></i>${m.name}</span>
-        <span class="hw-val">${cur}<small> ${m.unit}</small></span>
+        <span class="hw-name"><i style="background:${safeColor(m.color)}"></i>${escapeHTML(m.name)}</span>
+        <span class="hw-val">${escapeHTML(cur)}<small> ${escapeHTML(m.unit)}</small></span>
       </div>
       <div class="hw-chart"></div>`;
     grid.appendChild(card);
-    const s = await DB.metricSeries(state.device, m.id, state.range);
     Charts.line(card.querySelector('.hw-chart'), {
-      labels: s.labels, values: s.values, color: m.color, unit: ' ' + m.unit, height: 120,
+      labels: series.labels, values: series.values, color: m.color, unit: ' ' + m.unit, height: 120,
     });
-  }
+  });
 }
 
 /* ---------------- 白名单（可添加 / 编辑 / 删除） ---------------- */
@@ -427,10 +452,10 @@ function renderWhitelist() {
     const item = document.createElement('div');
     item.className = 'wl-item' + (on ? '' : ' off');
     item.innerHTML = `
-      <div class="wl-icon">${a.icon}</div>
+      <div class="wl-icon">${escapeHTML(a.icon)}</div>
       <div class="wl-info">
-        <div class="wl-name">${a.name}<code class="wl-id">${a.id}</code></div>
-        <div class="wl-cat">${a.category}</div>
+        <div class="wl-name">${escapeHTML(a.name)}<code class="wl-id">${escapeHTML(a.id)}</code></div>
+        <div class="wl-cat">${escapeHTML(a.category)}</div>
       </div>
       <div class="wl-ops">
         <button class="wl-op" data-act="edit" title="编辑名称 / 分类 / 颜色"><svg viewBox="0 0 24 24"><path d="${ICON_EDIT}"/></svg></button>
@@ -476,13 +501,13 @@ async function openAppForm(editing) {
     <div class="app-form">
       <h3>${isEdit ? '编辑软件' : '添加软件'}</h3>
       <label>进程<span class="req">*</span><span class="hint-inline">（从检测到的进程中选择，或手动输入）</span></label>
-      <input class="af-id" list="af-proc-list" placeholder="点击选择已检测到的进程…" value="${isEdit ? editing.id : ''}" ${isEdit ? 'readonly title="如需更换进程，请删除后重新添加"' : 'autofocus'}>
+      <input class="af-id" list="af-proc-list" placeholder="点击选择已检测到的进程…" value="${escapeHTML(isEdit ? editing.id : '')}" ${isEdit ? 'readonly title="如需更换进程，请删除后重新添加"' : 'autofocus'}>
       <datalist id="af-proc-list">${known.map(k => {
         const cur = mergedApps().some(a => a.id === k.id);
-        return `<option value="${k.id}" label="${cur ? '已在清单' : '未添加'} · 累计 ${k.minutes} 分钟"></option>`;
+        return `<option value="${escapeHTML(k.id)}" label="${cur ? '已在清单' : '未添加'} · 累计 ${Number(k.minutes) || 0} 分钟"></option>`;
       }).join('')}</datalist>
       <label>显示名称<span class="hint-inline">（留空则用进程名）</span></label>
-      <input class="af-name" placeholder="如 Google Chrome" value="${isEdit ? editing.name : ''}">
+      <input class="af-name" placeholder="如 Google Chrome" value="${escapeHTML(isEdit ? editing.name : '')}">
       <label>软件类型</label>
       <select class="af-cat">${CATEGORIES.map(c => `<option ${c === def.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
       <label>颜色</label>
@@ -556,14 +581,16 @@ async function openAppForm(editing) {
 
 /* ---------------- 总渲染入口 ---------------- */
 async function renderAll() {
-  await Promise.all([
-    renderOverview(),
-    renderTotal(),
-    renderApps(),
-    renderPie(),
-    renderHardware(),
-  ]);
+  const token = ++renderGeneration;
+  const ctx = snapshotRenderState();
   renderWhitelist();
+  await Promise.all([
+    renderOverview(ctx, token),
+    renderTotal(ctx, token),
+    renderApps(ctx, token),
+    renderPie(ctx, token),
+    renderHardware(ctx, token),
+  ]);
 }
 
 /* ---------------- 启动 ---------------- */

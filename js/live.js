@@ -41,7 +41,7 @@ const LiveDB = (() => {
   }
   const q = (device, appIds) =>
     `device=${encodeURIComponent(device || 'all')}` +
-    (appIds && appIds.length ? `&apps=${encodeURIComponent(appIds.join(','))}` : '');
+    (Array.isArray(appIds) ? `&apps=${encodeURIComponent(appIds.join(','))}` : '');
 
   async function create() {
     const [devicesRaw, range, totals] = await Promise.all([

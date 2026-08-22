@@ -17,7 +17,7 @@ const db = require('./db');
 const agg = require('./aggregate');
 
 /* ---------- 配置（首启自动生成 token） ---------- */
-const CONFIG_PATH = path.join(__dirname, 'config.json');
+const CONFIG_PATH = process.env.SIMMER_CONFIG_PATH || path.join(__dirname, 'config.json');
 let config;
 if (fs.existsSync(CONFIG_PATH)) {
   config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -28,6 +28,7 @@ if (fs.existsSync(CONFIG_PATH)) {
 }
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json({ limit: '8mb' }));
 
 /* ---------- 上报 ---------- */
@@ -65,7 +66,10 @@ app.post('/api/ingest', auth, (req, res) => {
 });
 
 /* ---------- 查询（与前端 data.js 同构） ---------- */
-const csv = s => (s && String(s).trim()) ? String(s).split(',').map(x => x.trim()).filter(Boolean) : undefined;
+// 未提供 apps = 不筛选；显式 apps= = 空集合（白名单清空后应返回零数据）。
+const csv = s => s === undefined
+  ? undefined
+  : String(s).split(',').map(x => x.trim()).filter(Boolean);
 
 app.get('/api/devices', (req, res) => res.json(agg.devices()));
 app.get('/api/year', (req, res) =>
@@ -78,11 +82,18 @@ app.get('/api/app-weekday', (req, res) =>
   res.json(agg.appWeekday(req.query.device || 'all', req.query.app || '')));
 app.get('/api/range', (req, res) => res.json(agg.rangeInfo()));
 
-/* ---------- 静态托管前端 ---------- */
-app.use(express.static(path.join(__dirname, '..')));
+/* ---------- 静态托管前端（严格白名单，禁止暴露 server/config.json 与数据库） ---------- */
+const WEB_ROOT = path.join(__dirname, '..');
+app.get(['/', '/index.html'], (req, res) => res.sendFile(path.join(WEB_ROOT, 'index.html')));
+app.use('/css', express.static(path.join(WEB_ROOT, 'css'), { index: false }));
+app.use('/js', express.static(path.join(WEB_ROOT, 'js'), { index: false }));
 
-const PORT = config.port || 8788;
-app.listen(PORT, () => {
-  console.log(`[simmer] 后端已启动：http://localhost:${PORT}`);
-  console.log('[simmer] 前端预览（真数据）：http://localhost:' + PORT + '/index.html');
-});
+if (require.main === module) {
+  const PORT = config.port || 8788;
+  app.listen(PORT, () => {
+    console.log(`[simmer] 后端已启动：http://localhost:${PORT}`);
+    console.log('[simmer] 前端预览（真数据）：http://localhost:' + PORT + '/index.html');
+  });
+}
+
+module.exports = app;

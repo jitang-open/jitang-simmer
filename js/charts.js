@@ -15,6 +15,9 @@ const Charts = (() => {
   const LEVEL_HOURS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
   let tip = null;
   let gradSeq = 0;
+  const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
+  const safeColor = value => /^#[0-9a-f]{6}$/i.test(String(value)) ? String(value) : '#8b949e';
 
   /* ---------- 全局 tooltip ---------- */
   function init() {
@@ -126,7 +129,8 @@ const Charts = (() => {
    * ============================================================ */
   function line(container, cfg) {
     container.innerHTML = '';
-    const { labels, values, color, unit } = cfg;
+    const { labels, values, unit } = cfg;
+    const color = safeColor(cfg.color);
     const W = 640, H = cfg.height || 180, P = { l: 38, r: 12, t: 14, b: 24 };
     const n = values.length;
     const max = Math.max(...values, 0.001) * 1.15;
@@ -206,7 +210,7 @@ const Charts = (() => {
       dot.style.opacity = 1;
       if (i !== lastIdx) {   // 仅在数据点变化时重建内容，移动时只重定位
         lastIdx = i;
-        showTip(`<span class="tip-date">${labels[i]}</span><br><b>${values[i]}${unit}</b>`, e.clientX, e.clientY);
+        showTip(`<span class="tip-date">${escapeHTML(labels[i])}</span><br><b>${escapeHTML(values[i])}${escapeHTML(unit)}</b>`, e.clientX, e.clientY);
       } else {
         moveTip(e.clientX, e.clientY);
       }
@@ -228,9 +232,9 @@ const Charts = (() => {
       const row = document.createElement('div');
       row.className = 'hbar-row';
       row.innerHTML = `
-        <div class="hbar-icon">${r.icon}</div>
-        <div class="hbar-name">${r.name}<small>${r.category || ''}</small></div>
-        <div class="hbar-track"><div class="hbar-fill" style="background:${r.color};color:${r.color}"></div></div>
+        <div class="hbar-icon">${escapeHTML(r.icon)}</div>
+        <div class="hbar-name">${escapeHTML(r.name)}<small>${escapeHTML(r.category || '')}</small></div>
+        <div class="hbar-track"><div class="hbar-fill" style="background:${safeColor(r.color)};color:${safeColor(r.color)}"></div></div>
         <div class="hbar-val">${fmtMin(r.minutes)}</div>`;
       row.addEventListener('click', () => onRow(r, row));
       container.appendChild(row);
@@ -256,22 +260,22 @@ const Charts = (() => {
       if (frac <= 0) return;
       const seg = el('circle', {
         cx, cy, r: R, fill: 'none',
-        stroke: r.color, 'stroke-width': 22,
+        stroke: safeColor(r.color), 'stroke-width': 22,
         'stroke-dasharray': `${Math.max(frac * C - 2.5, 0.5)} ${C - frac * C + 2.5}`,
         'stroke-dashoffset': -acc * C,
         transform: `rotate(-90 ${cx} ${cy})`,
-        class: 'pie-seg', style: `color:${r.color}`,
+        class: 'pie-seg', style: `color:${safeColor(r.color)}`,
       });
       const pct = (frac * 100).toFixed(1);
-      seg.addEventListener('mouseenter', e => showTip(`${r.icon} ${r.name}<br><b>${fmtMin(r.minutes)}</b> · ${pct}%`, e.clientX, e.clientY));
+      seg.addEventListener('mouseenter', e => showTip(`${escapeHTML(r.icon)} ${escapeHTML(r.name)}<br><b>${fmtMin(r.minutes)}</b> · ${pct}%`, e.clientX, e.clientY));
       seg.addEventListener('mousemove', e => moveTip(e.clientX, e.clientY));
       seg.addEventListener('mouseleave', hideTip);
       svg.appendChild(seg);
       acc += frac;
 
       const li = document.createElement('li');
-      li.innerHTML = `<span class="pl-dot" style="background:${r.color}"></span>
-        <span class="pl-name">${r.name}</span><span class="pl-pct">${pct}%</span>`;
+      li.innerHTML = `<span class="pl-dot" style="background:${safeColor(r.color)}"></span>
+        <span class="pl-name">${escapeHTML(r.name)}</span><span class="pl-pct">${pct}%</span>`;
       legendEl.appendChild(li);
     });
 
@@ -289,7 +293,8 @@ const Charts = (() => {
    * ============================================================ */
   function vbars(container, cfg) {
     container.innerHTML = '';
-    const { labels, values, color, unit } = cfg;
+    const { labels, values, unit } = cfg;
+    const color = safeColor(cfg.color);
     // 与折线图相同的 640×200 viewBox，保证并排时高度严格对齐
     const W = 640, H = 200, P = { l: 10, r: 10, t: 14, b: 26 };
     const n = values.length;
@@ -310,8 +315,8 @@ const Charts = (() => {
       rect.style.transformOrigin = 'bottom';
       rect.style.transition = 'transform .5s cubic-bezier(.22,.8,.35,1) ' + (i * 55) + 'ms, opacity .2s';
       rect.style.transform = 'scaleY(0)';
-      rect.addEventListener('mouseenter', e => { rect.setAttribute('opacity', 1); showTip(`${labels[i]}<br><b>${v}${unit}</b>`, e.clientX, e.clientY); });
-      rect.addEventListener('mousemove', e => showTip(tip.innerHTML, e.clientX, e.clientY));
+      rect.addEventListener('mouseenter', e => { rect.setAttribute('opacity', 1); showTip(`${escapeHTML(labels[i])}<br><b>${escapeHTML(v)}${escapeHTML(unit)}</b>`, e.clientX, e.clientY); });
+      rect.addEventListener('mousemove', e => moveTip(e.clientX, e.clientY));
       rect.addEventListener('mouseleave', () => { rect.setAttribute('opacity', 0.9); hideTip(); });
       svg.appendChild(rect);
       const tx = el('text', { x: x + bw / 2, y: H - 8, 'text-anchor': 'middle', class: 'lc-axis' });
