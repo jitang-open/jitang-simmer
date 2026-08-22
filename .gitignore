@@ -13,3 +13,5 @@ server/config.json
 collector/SimmerCollector/bin/
 collector/SimmerCollector/obj/
 collector/SimmerCollector.exe
+collector/SimmerTokenScan/target/
+collector/simmer-token-scan.exe

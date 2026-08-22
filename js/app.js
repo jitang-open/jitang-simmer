@@ -71,10 +71,31 @@ const state = {
   customApps: loadCustomApps(),                         // 自定义软件条目 / 元数据覆盖（localStorage）
   removedApps: loadRemovedApps(),                       // 已删除的软件 id（localStorage）
   offApps: loadOffApps(),                               // 添加过但开关关闭的软件 id（localStorage）
+  tokenSource: '',                                      // AI Token 来源筛选
+  tokenProvider: '',                                    // AI Token provider 筛选
+  tokenModel: '',                                       // AI Token 模型筛选
 };
 
 const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', total: '累计' };
+const TOKEN_SOURCE_NAME = { codex: 'Codex', zcode: 'ZCode', dsh: 'DeepSeek Harness' };
+const TOKEN_STATUS = {
+  ready: ['可用', 'ok'],
+  installed_no_data: ['已安装，暂无数据', 'muted'],
+  history_only: ['仅历史数据', 'warn'],
+  not_found: ['未找到', 'muted'],
+  incompatible: ['解析器不可用', 'bad'],
+  error: ['扫描失败', 'bad'],
+};
 const wlIds = () => [...state.whitelist];
+
+function formatTokens(value, compact = false) {
+  const number = Number(value) || 0;
+  if (!compact) return Math.round(number).toLocaleString('zh-CN');
+  if (number >= 1e9) return (number / 1e9).toFixed(number >= 1e10 ? 1 : 2).replace(/\.0+$/, '') + 'B';
+  if (number >= 1e6) return (number / 1e6).toFixed(number >= 1e7 ? 1 : 2).replace(/\.0+$/, '') + 'M';
+  if (number >= 1e3) return (number / 1e3).toFixed(number >= 1e4 ? 1 : 2).replace(/\.0+$/, '') + 'K';
+  return Math.round(number).toLocaleString('zh-CN');
+}
 
 function settingsPayload() {
   return {
@@ -312,6 +333,9 @@ const snapshotRenderState = () => ({
   range: state.range,
   year: state.year,
   appIds: wlIds(),
+  tokenSource: state.tokenSource,
+  tokenProvider: state.tokenProvider,
+  tokenModel: state.tokenModel,
 });
 const isRenderCurrent = token => token === renderGeneration;
 
@@ -333,9 +357,9 @@ async function renderOverview(ctx, token) {
   const cards = [
     { label: RANGE_LABEL[ctx.range] + '总时长', value: `${th}<small> 小时 </small>${tm}<small> 分</small>`, extra: `白名单内 ${ctx.appIds.length} 款软件`, icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm1 10.6l4.2 2.5-.8 1.3L11 13.5V7h2v5.6z' },
     { label: '活跃软件', value: activeApps + ' <small>款</small>', extra: RANGE_LABEL[ctx.range] + '内有使用记录', icon: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
-    { label: 'CPU 占用', value: hwReady ? cpu + ' <small>%</small>' : '—', extra: hwReady ? '当前时刻 · 实时采集' : '待 M1.5 硬件采集支持', icon: 'M9 9h6v6H9zM12 1v4M12 19v4M1 12h4M19 12h4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M19.8 4.2L17 7M7 17l-2.8 2.8' },
-    { label: '核心温度', value: temp !== null ? temp + ' <small>°C</small>' : '—', extra: temp !== null ? 'CPU / GPU 平均' : '待 M1.5 硬件采集支持', icon: 'M14 14.8V5a2 2 0 10-4 0v9.8a4.5 4.5 0 104 0z' },
-    { label: '整机功耗', value: power !== null ? power + ' <small>W</small>' : '—', extra: power !== null ? (ctx.device === 'all' ? '全部设备合计' : '当前设备') : '待 M1.5 硬件采集支持', icon: 'M13 2L4 14h6v8l9-12h-6V2z' },
+    { label: 'CPU 占用', value: hwReady ? cpu + ' <small>%</small>' : '—', extra: hwReady ? '当前时刻 · 实时采集' : '待 M2 硬件采集支持', icon: 'M9 9h6v6H9zM12 1v4M12 19v4M1 12h4M19 12h4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M19.8 4.2L17 7M7 17l-2.8 2.8' },
+    { label: '核心温度', value: temp !== null ? temp + ' <small>°C</small>' : '—', extra: temp !== null ? 'CPU / GPU 平均' : '待 M2 硬件采集支持', icon: 'M14 14.8V5a2 2 0 10-4 0v9.8a4.5 4.5 0 104 0z' },
+    { label: '整机功耗', value: power !== null ? power + ' <small>W</small>' : '—', extra: power !== null ? (ctx.device === 'all' ? '全部设备合计' : '当前设备') : '待 M2 硬件采集支持', icon: 'M13 2L4 14h6v8l9-12h-6V2z' },
   ];
 
   $('#sec-overview').innerHTML = cards.map(c => `
@@ -478,11 +502,128 @@ async function renderPie(ctx, token) {
   legend.appendChild(more);
 }
 
+/* ---------------- AI Token 统计（请求级数字元数据） ---------------- */
+function fillTokenFilter(selector, values, selected, labeler = value => value) {
+  const select = $(selector);
+  select.innerHTML = '<option value="">全部</option>' + values.map(value =>
+    `<option value="${escapeHTML(value)}" ${value === selected ? 'selected' : ''}>${escapeHTML(labeler(value))}</option>`
+  ).join('');
+}
+
+function renderTokenRanks(container, rows, labeler = value => value) {
+  if (!rows.length) {
+    container.innerHTML = '<div class="token-rank-empty">当前筛选范围暂无数据</div>';
+    return;
+  }
+  const max = Math.max(...rows.map(row => row.tokens), 1);
+  container.innerHTML = rows.slice(0, 10).map(row => `
+    <div class="token-rank-row">
+      <div class="token-rank-label" title="${escapeHTML(labeler(row.id))}">${escapeHTML(labeler(row.id))}</div>
+      <div class="token-rank-track"><i style="width:${(row.tokens / max * 100).toFixed(1)}%"></i></div>
+      <div class="token-rank-value">${formatTokens(row.tokens, true)}<small>${row.eventCount.toLocaleString('zh-CN')} 次</small></div>
+    </div>`).join('');
+}
+
+async function renderTokens(ctx, token) {
+  const summaryWrap = $('#tokenSummary');
+  const empty = $('#tokenEmpty');
+  const chartGrid = document.querySelector('#sec-tokens .token-chart-grid');
+  if (!DB.live || typeof DB.tokenSummary !== 'function') {
+    if (!isRenderCurrent(token)) return;
+    summaryWrap.hidden = true;
+    chartGrid.hidden = true;
+    empty.hidden = false;
+    empty.textContent = 'AI Token 统计只在连接本地后端时显示；当前演示数据不包含伪造 Token。';
+    return;
+  }
+
+  const dimensions = await DB.tokenDimensions(ctx.device);
+  if (!isRenderCurrent(token)) return;
+  const choose = (value, values) => values.includes(value) ? value : '';
+  const source = choose(ctx.tokenSource, dimensions.sources);
+  const provider = choose(ctx.tokenProvider, dimensions.providers);
+  const model = choose(ctx.tokenModel, dimensions.models);
+  state.tokenSource = source;
+  state.tokenProvider = provider;
+  state.tokenModel = model;
+  fillTokenFilter('#tokenSourceFilter', dimensions.sources, source, value => TOKEN_SOURCE_NAME[value] || value);
+  fillTokenFilter('#tokenProviderFilter', dimensions.providers, provider);
+  fillTokenFilter('#tokenModelFilter', dimensions.models, model);
+
+  const filters = { source, provider, model };
+  const [summary, trend, year, sourceRows, modelRows, statuses] = await Promise.all([
+    DB.tokenSummary(ctx.device, ctx.range, filters),
+    DB.tokenTrend(ctx.device, ctx.range, filters),
+    DB.tokenYear(ctx.device, ctx.year, filters),
+    DB.tokenBreakdown(ctx.device, ctx.range, filters, 'source'),
+    DB.tokenBreakdown(ctx.device, ctx.range, filters, 'model'),
+    DB.tokenSources(ctx.device),
+  ]);
+  if (!isRenderCurrent(token)) return;
+
+  const deviceNames = new Map(DB.devices.map(device => [device.id, device.name]));
+  const statusesWrap = $('#tokenStatuses');
+  statusesWrap.innerHTML = statuses.length ? statuses.map(row => {
+    const [statusLabel, tone] = TOKEN_STATUS[row.state] || [row.state, 'muted'];
+    const deviceLabel = ctx.device === 'all' ? `<small>${escapeHTML(deviceNames.get(row.deviceId) || row.deviceId)}</small>` : '';
+    return `<div class="token-status ${tone}"><span>${escapeHTML(TOKEN_SOURCE_NAME[row.source] || row.source)}${deviceLabel}</span><b>${escapeHTML(statusLabel)}</b></div>`;
+  }).join('') : '<div class="token-status muted"><span>本地来源</span><b>尚未扫描</b></div>';
+
+  const hasData = summary.eventCount > 0;
+  summaryWrap.hidden = !hasData;
+  chartGrid.hidden = !hasData;
+  empty.hidden = hasData;
+  if (!hasData) {
+    empty.textContent = '当前设备、时间范围或筛选条件下暂无 Token 记录；上方来源状态用于区分“未安装”和“尚无数据”。';
+    $('#tokenSub').textContent = `${RANGE_LABEL[ctx.range]} · 请求级本地用量 · 暂无匹配记录`;
+    return;
+  }
+
+  const cards = [
+    ['总 Token', summary.totalTokens, `${summary.eventCount.toLocaleString('zh-CN')} 次请求`],
+    ['非缓存输入', summary.inputTokens, 'input'],
+    ['普通输出', summary.outputTokens, 'output（不含推理）'],
+    ['缓存读取', summary.cacheReadTokens, 'cache read'],
+    ['缓存写入', summary.cacheWriteTokens, 'cache write'],
+    ['推理 Token', summary.reasoningTokens, 'reasoning'],
+  ];
+  summaryWrap.innerHTML = cards.map(([label, value, detail], index) => `
+    <div class="token-stat ${index === 0 ? 'primary' : ''}">
+      <span>${escapeHTML(label)}</span>
+      <strong title="${formatTokens(value)}">${formatTokens(value, true)}</strong>
+      <small>${escapeHTML(detail)}</small>
+    </div>`).join('');
+  $('#tokenSub').textContent = `${RANGE_LABEL[ctx.range]} · ${formatTokens(summary.totalTokens)} Tokens · ${summary.eventCount.toLocaleString('zh-CN')} 次请求`;
+
+  const yearlyTokens = year.reduce((sum, day) => sum + (day.tokens || 0), 0);
+  const activeDays = year.filter(day => day.tokens > 0).length;
+  $('#tokenYearHint').textContent = `${ctx.year} 年 ${formatTokens(yearlyTokens, true)} · ${activeDays} 天有记录`;
+  Charts.heatmap($('#tokenHeatmap'), year, {
+    valueKey: 'tokens',
+    valueLabel: 'Tokens',
+    formatValue: value => `${formatTokens(value)} Tokens`,
+  });
+
+  const maxTrend = Math.max(...trend.values, 0);
+  const divisor = maxTrend >= 1e9 ? 1e9 : maxTrend >= 1e6 ? 1e6 : maxTrend >= 1e3 ? 1e3 : 1;
+  const trendUnit = divisor === 1e9 ? ' B' : divisor === 1e6 ? ' M' : divisor === 1e3 ? ' K' : '';
+  $('#tokenTrendHint').textContent = { daily: '今日 24 小时', weekly: '近 7 天', total: '近 12 个月' }[ctx.range];
+  Charts.line($('#tokenTrend'), {
+    labels: trend.labels,
+    values: trend.values.map(value => +(value / divisor).toFixed(2)),
+    rawValues: trend.values,
+    valueFormatter: value => `${formatTokens(value)} Tokens`,
+    color: '#a259ff', unit: trendUnit, height: 180,
+  });
+  renderTokenRanks($('#tokenSourceRank'), sourceRows, value => TOKEN_SOURCE_NAME[value] || value);
+  renderTokenRanks($('#tokenModelRank'), modelRows);
+}
+
 /* ---------------- 硬件监控 ---------------- */
 async function renderHardware(ctx, token) {
   const grid = $('#hwGrid');
-  if (!DB.metricDefs.length) {                      // M1 无硬件采集，M1.5（CAP-06）补齐
-    if (isRenderCurrent(token)) grid.innerHTML = '<div class="hw-empty">硬件指标采集将在 M1.5（CAP-06，基于 LibreHardwareMonitor）接入</div>';
+  if (!DB.metricDefs.length) {                      // M2（CAP-06）补齐硬件采集
+    if (isRenderCurrent(token)) grid.innerHTML = '<div class="hw-empty">硬件指标采集将在 M2（CAP-06，基于 LibreHardwareMonitor）接入</div>';
     return;
   }
   const metrics = await Promise.all(DB.metricDefs.map(async m => ({
@@ -662,6 +803,7 @@ async function renderAll() {
     renderTotal(ctx, token),
     renderApps(ctx, token),
     renderPie(ctx, token),
+    renderTokens(ctx, token),
     renderHardware(ctx, token),
   ]);
 }
@@ -735,6 +877,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   buildDeviceSelect();
   buildYearSelect();
   renderSideDevices();
+  [
+    ['#tokenSourceFilter', 'tokenSource'],
+    ['#tokenProviderFilter', 'tokenProvider'],
+    ['#tokenModelFilter', 'tokenModel'],
+  ].forEach(([selector, key]) => $(selector).addEventListener('change', event => {
+    state[key] = event.target.value;
+    renderAll();
+  }));
   renderAll();
 
   $('#wlAdd').addEventListener('click', () => openAppForm(null));

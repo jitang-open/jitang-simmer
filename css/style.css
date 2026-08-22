@@ -311,6 +311,86 @@ body {
 .pie-legend .pl-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pie-legend .pl-pct { margin-left: auto; color: var(--text-2); font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* ---------------- AI Token 统计 ---------------- */
+[hidden] { display: none !important; }
+.token-head { align-items: center; }
+.token-filters { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.token-filters label {
+  display: grid; gap: 4px; color: var(--text-3); font-size: 10.5px; font-weight: 650;
+}
+.token-filters select {
+  min-width: 126px; max-width: 210px; height: 32px;
+  color: var(--text); background: #131820; border: 1px solid var(--border-hi);
+  border-radius: 8px; padding: 0 28px 0 9px; font: 600 11.5px var(--font);
+  outline: none; cursor: pointer;
+}
+.token-filters select:focus { border-color: #a259ff; box-shadow: 0 0 0 2px rgba(162,89,255,.14); }
+.token-statuses { display: flex; flex-wrap: wrap; gap: 7px; margin: -2px 0 14px; }
+.token-status {
+  display: flex; align-items: center; gap: 8px; background: #131820;
+  border: 1px solid var(--border); border-radius: 99px; padding: 5px 9px;
+  font-size: 11px; color: var(--text-2);
+}
+.token-status span { display: flex; align-items: center; gap: 5px; }
+.token-status span::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.token-status span small { color: var(--text-3); font-size: 9.5px; border-left: 1px solid var(--border-hi); padding-left: 5px; }
+.token-status b { font-size: 10.5px; color: var(--text-2); }
+.token-status.ok { border-color: rgba(57,211,83,.28); }
+.token-status.ok span::before { background: var(--green-hi); box-shadow: 0 0 7px rgba(57,211,83,.65); }
+.token-status.warn span::before { background: #e3b341; }
+.token-status.bad span::before { background: #f85149; }
+.token-status.muted { opacity: .72; }
+.token-summary {
+  display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr));
+  gap: 9px; margin-bottom: 14px;
+}
+.token-stat {
+  min-width: 0; background: #131820; border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 12px;
+}
+.token-stat.primary { border-color: rgba(162,89,255,.5); background: linear-gradient(145deg, rgba(162,89,255,.12), #131820); }
+.token-stat span { display: block; color: var(--text-3); font-size: 10.5px; font-weight: 650; }
+.token-stat strong {
+  display: block; margin-top: 5px; color: var(--text); font-size: 19px;
+  font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.token-stat.primary strong { color: #c9a7ff; }
+.token-stat small { display: block; color: var(--text-3); font-size: 9.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.token-empty {
+  color: var(--text-3); font-size: 12.5px; text-align: center;
+  background: #131820; border: 1px dashed var(--border-hi); border-radius: 11px; padding: 24px;
+}
+.token-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.token-panel { min-width: 0; background: #131820; border: 1px solid var(--border); border-radius: 11px; padding: 13px 14px; }
+.token-panel-wide { grid-column: 1 / -1; }
+.token-panel-title { color: var(--text-2); font-size: 12px; font-weight: 750; margin-bottom: 8px; }
+.token-panel-title span { color: var(--text-3); font-size: 10.5px; font-weight: 500; margin-left: 6px; }
+.token-ranks { display: grid; gap: 5px; }
+.token-rank-row {
+  display: grid; grid-template-columns: minmax(100px, 150px) 1fr 76px;
+  align-items: center; gap: 9px; padding: 5px 4px;
+}
+.token-rank-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 650; }
+.token-rank-track { height: 7px; background: #232830; border-radius: 99px; overflow: hidden; }
+.token-rank-track i { display: block; height: 100%; background: linear-gradient(90deg, #7c3aed, #bc8cff); border-radius: inherit; }
+.token-rank-value { text-align: right; color: #c9a7ff; font-size: 11.5px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.token-rank-value small { display: block; color: var(--text-3); font-size: 8.5px; font-weight: 500; }
+.token-rank-empty { color: var(--text-3); font-size: 11.5px; padding: 18px; text-align: center; }
+
+@media (max-width: 860px) {
+  .token-head { align-items: flex-start; flex-direction: column; }
+  .token-filters { justify-content: flex-start; width: 100%; }
+  .token-filters label { flex: 1; }
+  .token-filters select { width: 100%; max-width: none; min-width: 100px; }
+  .token-summary { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+}
+@media (max-width: 620px) {
+  .token-chart-grid { grid-template-columns: 1fr; }
+  .token-panel-wide { grid-column: auto; }
+  .token-summary { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
+  .token-rank-row { grid-template-columns: 100px 1fr 62px; }
+}
+
 /* ---------------- 硬件监控 ---------------- */
 .hw-empty {
   grid-column: 1 / -1;

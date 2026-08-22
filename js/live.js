@@ -2,8 +2,8 @@
  * Simmer · 实时数据源（对接 Simmer Server 后端）
  *  - 接口与 data.js（MockDB）同构：调用返回 Promise，
  *    app.js 统一用 await 接收（await 同步值同样成立，两库通用）
- *  - M1 仅采集软件时长，硬件指标（metricDefs）为空，
- *    metricCurrent 返回 null，由界面提示"M1.5 支持"
+ *  - M1.5 已增加 AI Token 统计；硬件指标（metricDefs）仍为空，
+ *    metricCurrent 返回 null，由界面提示 M2 支持
  *  - APP_META 为内置进程映射表（CAP-02 第一版）
  * ============================================================ */
 const LiveDB = (() => {
@@ -42,6 +42,14 @@ const LiveDB = (() => {
   const q = (device, appIds) =>
     `device=${encodeURIComponent(device || 'all')}` +
     (Array.isArray(appIds) ? `&apps=${encodeURIComponent(appIds.join(','))}` : '');
+  const tokenQ = (device, range, filters = {}) => {
+    let query = `device=${encodeURIComponent(device || 'all')}`;
+    if (range) query += `&range=${encodeURIComponent(range)}`;
+    if (filters.source) query += `&sources=${encodeURIComponent(filters.source)}`;
+    if (filters.provider) query += `&providers=${encodeURIComponent(filters.provider)}`;
+    if (filters.model) query += `&models=${encodeURIComponent(filters.model)}`;
+    return query;
+  };
 
   async function create() {
     const [devicesRaw, range, totals, settingsRaw] = await Promise.all([
@@ -59,7 +67,7 @@ const LiveDB = (() => {
       yearList,
       apps: totals.map(r => ({ id: r.id, ...meta(r.id) })),
       devices: devicesRaw.map(d => ({ id: d.id, name: d.name, host: d.id, os: '' })),
-      metricDefs: [],                                    // 硬件指标 M1.5 支持
+      metricDefs: [],                                    // 硬件指标 M2 支持
       serverSettings: settingsRaw.settings,
       saveSettings: settings => j('/api/settings', {
         method: 'PUT',
@@ -87,6 +95,22 @@ const LiveDB = (() => {
         const rows = await j(`/api/app-totals?${q(device, appIds)}&range=${range2}`);
         return rows.reduce((s, r) => s + r.minutes, 0);
       },
+      tokenDimensions: device =>
+        j(`/api/ai-tokens/dimensions?device=${encodeURIComponent(device || 'all')}`),
+      tokenSummary: (device, range2, filters) =>
+        j(`/api/ai-tokens/summary?${tokenQ(device, range2, filters)}`),
+      tokenTrend: (device, range2, filters) =>
+        j(`/api/ai-tokens/trend?${tokenQ(device, range2, filters)}`),
+      tokenYear: (device, year, filters) =>
+        j(`/api/ai-tokens/year?${tokenQ(device, null, filters)}&year=${year}`)
+          .then(rows => rows.map(row => ({
+            date: new Date(row.date + 'T00:00:00'),
+            tokens: row.tokens,
+          }))),
+      tokenBreakdown: (device, range2, filters, dimension) =>
+        j(`/api/ai-tokens/breakdown?${tokenQ(device, range2, filters)}&dimension=${encodeURIComponent(dimension)}`),
+      tokenSources: device =>
+        j(`/api/ai-tokens/sources?device=${encodeURIComponent(device || 'all')}`),
     };
   }
 

@@ -8,6 +8,8 @@
  *  - GET  /api/app-weekday?device=&app=        单软件星期分布
  *  - GET  /api/range                           数据日期范围（SRV-04）
  *  - GET/PUT /api/settings                     白名单与软件元数据（SRV-05）
+ *  - POST /api/ai-token-events                 请求级 Token 数字事件（Bearer token 鉴权）
+ *  - GET  /api/ai-tokens/*                     Token 汇总、趋势、热力图与来源状态
  *  - 静态托管前端（http://localhost:8788/ 直接真数据预览）
  * ============================================================ */
 const express = require('express');
@@ -16,6 +18,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const db = require('./db');
 const agg = require('./aggregate');
+const tokenAgg = require('./token-aggregate');
 
 /* ---------- 配置（首启自动生成 token） ---------- */
 const CONFIG_PATH = process.env.SIMMER_CONFIG_PATH || path.join(__dirname, 'config.json');
@@ -66,6 +69,109 @@ app.post('/api/ingest', auth, (req, res) => {
   res.json({ ok: true, received: minutes.length });
 });
 
+/* ---------- AI Token 请求级事件上报（TS-04/06） ---------- */
+const SOURCE_STATES = new Set(['ready', 'installed_no_data', 'history_only', 'not_found', 'incompatible', 'error']);
+const SOURCE_EVENT_ID = /^[a-f0-9]{64}$/;
+const MAX_TOKEN_EVENTS = 5000;
+const safeText = (value, max, { allowEmpty = true } = {}) =>
+  typeof value === 'string' && value.length <= max && (allowEmpty || value.length > 0);
+const safeToken = value => Number.isSafeInteger(value) && value >= 0;
+const safeTimestamp = value => safeText(value, 64, { allowEmpty: false }) && Number.isFinite(Date.parse(value));
+
+function normalizeTokenEvent(event) {
+  if (!event || typeof event !== 'object' ||
+      !SOURCE_EVENT_ID.test(event.sourceEventId || '') ||
+      !tokenAgg.SOURCES.includes(event.source) ||
+      !safeText(event.provider, 200) || !safeText(event.model, 200) ||
+      !safeTimestamp(event.occurredAt) || !safeText(event.parserVersion, 80)) return null;
+
+  const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'totalTokens'];
+  if (!fields.every(field => safeToken(event[field]))) return null;
+  const computedTotal = event.inputTokens + event.outputTokens + event.cacheReadTokens +
+    event.cacheWriteTokens + event.reasoningTokens;
+  if (!Number.isSafeInteger(computedTotal) || computedTotal !== event.totalTokens) return null;
+
+  return {
+    sourceEventId: event.sourceEventId,
+    source: event.source,
+    provider: event.provider,
+    model: event.model,
+    occurredAt: new Date(event.occurredAt).toISOString(),
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    cacheReadTokens: event.cacheReadTokens,
+    cacheWriteTokens: event.cacheWriteTokens,
+    reasoningTokens: event.reasoningTokens,
+    totalTokens: event.totalTokens,
+    parserVersion: event.parserVersion,
+  };
+}
+
+function normalizeSourceStatus(status) {
+  if (!status || typeof status !== 'object' ||
+      !tokenAgg.SOURCES.includes(status.source) || !SOURCE_STATES.has(status.state) ||
+      !safeText(status.detailCode, 100) || !safeTimestamp(status.checkedAt) ||
+      !safeText(status.parserVersion, 80)) return null;
+  return {
+    source: status.source,
+    state: status.state,
+    detailCode: status.detailCode,
+    checkedAt: new Date(status.checkedAt).toISOString(),
+    parserVersion: status.parserVersion,
+  };
+}
+
+const insertTokenEvent = db.prepare(`
+  INSERT INTO ai_token_events (
+    device_id, source, source_event_id, provider, model, occurred_at,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+    reasoning_tokens, total_tokens, parser_version, received_at
+  ) VALUES (
+    @deviceId, @source, @sourceEventId, @provider, @model, @occurredAt,
+    @inputTokens, @outputTokens, @cacheReadTokens, @cacheWriteTokens,
+    @reasoningTokens, @totalTokens, @parserVersion, @receivedAt
+  ) ON CONFLICT(device_id, source, source_event_id) DO NOTHING
+`);
+const upsertSourceStatus = db.prepare(`
+  INSERT INTO ai_source_status (device_id, source, state, detail_code, checked_at, parser_version)
+  VALUES (@deviceId, @source, @state, @detailCode, @checkedAt, @parserVersion)
+  ON CONFLICT(device_id, source) DO UPDATE SET
+    state=excluded.state, detail_code=excluded.detail_code,
+    checked_at=excluded.checked_at, parser_version=excluded.parser_version
+`);
+const storeTokenBatch = db.transaction((deviceId, deviceName, events, statuses, receivedAt) => {
+  upsertDevice.run({ id: deviceId, name: deviceName, now: receivedAt });
+  let inserted = 0;
+  for (const event of events) inserted += insertTokenEvent.run({ deviceId, ...event, receivedAt }).changes;
+  for (const status of statuses) upsertSourceStatus.run({ deviceId, ...status });
+  return inserted;
+});
+
+app.post('/api/ai-token-events', auth, (req, res) => {
+  const { deviceId, deviceName, events, statuses = [] } = req.body || {};
+  if (!safeText(deviceId, 200, { allowEmpty: false }) || !safeText(deviceName, 200, { allowEmpty: false }) ||
+      !Array.isArray(events) || events.length > MAX_TOKEN_EVENTS ||
+      !Array.isArray(statuses) || statuses.length > tokenAgg.SOURCES.length) {
+    return res.status(400).json({ error: 'bad_request' });
+  }
+  const normalizedEvents = events.map(normalizeTokenEvent);
+  const normalizedStatuses = statuses.map(normalizeSourceStatus);
+  if (normalizedEvents.some(event => !event) || normalizedStatuses.some(status => !status) ||
+      new Set(normalizedStatuses.map(status => status.source)).size !== normalizedStatuses.length) {
+    return res.status(400).json({ error: 'invalid_token_payload' });
+  }
+
+  const receivedAt = new Date().toISOString();
+  const inserted = storeTokenBatch(deviceId, deviceName, normalizedEvents, normalizedStatuses, receivedAt);
+  res.json({
+    ok: true,
+    received: normalizedEvents.length,
+    inserted,
+    duplicates: normalizedEvents.length - inserted,
+    statuses: normalizedStatuses.length,
+  });
+});
+
 /* ---------- 查询（与前端 data.js 同构） ---------- */
 // 未提供 apps = 不筛选；显式 apps= = 空集合（白名单清空后应返回零数据）。
 const csv = s => s === undefined
@@ -82,6 +188,29 @@ app.get('/api/app-totals', (req, res) =>
 app.get('/api/app-weekday', (req, res) =>
   res.json(agg.appWeekday(req.query.device || 'all', req.query.app || '')));
 app.get('/api/range', (req, res) => res.json(agg.rangeInfo()));
+
+const tokenFilters = query => ({
+  sources: csv(query.sources),
+  providers: csv(query.providers),
+  models: csv(query.models),
+});
+const tokenRange = value => ['daily', 'weekly', 'total'].includes(value) ? value : 'daily';
+app.get('/api/ai-tokens/summary', (req, res) =>
+  res.json(tokenAgg.summary(req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range))));
+app.get('/api/ai-tokens/trend', (req, res) =>
+  res.json(tokenAgg.trend(req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range))));
+app.get('/api/ai-tokens/year', (req, res) =>
+  res.json(tokenAgg.yearSeries(
+    req.query.device || 'all', tokenFilters(req.query), parseInt(req.query.year, 10) || new Date().getFullYear()
+  )));
+app.get('/api/ai-tokens/breakdown', (req, res) =>
+  res.json(tokenAgg.breakdown(
+    req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.dimension || 'source'
+  )));
+app.get('/api/ai-tokens/sources', (req, res) =>
+  res.json(tokenAgg.sourceStatuses(req.query.device || 'all')));
+app.get('/api/ai-tokens/dimensions', (req, res) =>
+  res.json(tokenAgg.dimensions(req.query.device || 'all')));
 
 /* ---------- 单用户面板设置（SQLite 为唯一数据源，localStorage 仅作缓存） ---------- */
 const getSettings = db.prepare(

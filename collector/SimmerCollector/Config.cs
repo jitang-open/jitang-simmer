@@ -13,6 +13,14 @@ internal class Config
     public int IdleThresholdMinutes { get; set; } = 5;
     /// <summary>上报间隔（分钟）</summary>
     public int UploadIntervalMinutes { get; set; } = 5;
+    /// <summary>是否启用本地 AI Token 来源扫描。</summary>
+    public bool EnableTokenStatistics { get; set; } = true;
+    /// <summary>Token 兜底扫描间隔；文件变化仍会在约 5 秒后触发。</summary>
+    public int TokenScanIntervalMinutes { get; set; } = 15;
+    /// <summary>可选手动数据根；留空时按环境变量和用户默认目录自动发现。</summary>
+    public string CodexHome { get; set; } = "";
+    public string ZCodeHome { get; set; } = "";
+    public string DshHome { get; set; } = "";
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 

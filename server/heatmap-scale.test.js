@@ -40,3 +40,13 @@ test('总览与单软件独立尺度对相同比例产生相同色阶', () => {
   assert.equal(totalScale.capMinutes, 800);
   assert.equal(appScale.level(40), totalScale.level(400));
 });
+
+test('AI Token 年度点阵复用 P95 色阶但读取独立 tokens 字段', () => {
+  const scale = buildHeatmapScale(
+    [1000, 2000, 3000, 4000, null].map(tokens => ({ tokens })),
+    'tokens'
+  );
+  assert.equal(scale.capMinutes, 4000);
+  assert.equal(scale.level(4000), 9);
+  assert.equal(scale.level(null), 0);
+});

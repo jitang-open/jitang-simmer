@@ -1,5 +1,18 @@
 # Jitang Simmer v0.7.0 AI Token 统计与本地来源发现
 
+> 实施状态：✅ M1.5 主链路已于 2026-08-22 完成。Codex 与 ZCode 已在真实数据环境验收；DeepSeek Harness 解析、发现和界面状态已接入，但当前机器尚无 DSH 数据，待接入 OpenCode Go / DeepSeek V4 Flash 后补做真实对照。
+
+## Implementation Result
+
+- 独立 `simmer-token-scan.exe` 已固定使用 `tokscale-core` 提交 `b069c85d530c35ba1a3517e80aaa8423428dccd8`，并以静态 CRT 的 Windows EXE 运行；不持有服务器 Token，也不联网。
+- 采集器已实现手动路径 → 环境变量 → 用户默认目录的数据根优先级，以及进程、PATH、App Paths、卸载注册表、开始菜单和已知用户应用目录的有界程序发现；不会递归扫描磁盘。
+- 文件变化约 5 秒触发、15 分钟兜底、48 小时增量、每日全量、原子离线队列和批量重试均已接入；本机持久化已确认的稳定哈希，活跃日志复扫只上传新增事件；Token 模块失败不会中断软件时长采集。
+- 后端已实现请求级幂等表、来源状态表、Bearer 批量上报和 summary/trend/year/breakdown/sources/dimensions 查询接口。
+- 前端已实现分类概览、年度 P95 点阵、趋势、来源/模型排行，以及设备、来源、provider、model、每日/每周/累计筛选；未安装或无数据使用来源状态明确区分。
+- 2026-08-22 20:19 真实首次导入：Codex 41 个文件、ZCode 1 个数据库，共接收 2,963 条请求级事件；同一批 500 条再次上报两次均为 `inserted=0 / duplicates=500`。
+- 当前验收限制：DSH 为 `not_found`，因此压缩会话与 DeepSeek V4 Flash 的真实总数仍需在 Harness 接通后对照；这不影响 Codex/ZCode 已完成的 M1.5 使用。
+- 自动验证：Node.js 22 后端/点阵测试 12/12、Rust sidecar 稳定哈希/互斥总数/时间转换测试 3/3、.NET Release 构建 0 警告/0 错误，真实页面 Playwright 渲染与来源筛选通过。
+
 ## Summary
 
 - 增加“本地 AI 数据源发现模块”，自动寻找 Codex、ZCode、DeepSeek Harness 的数据目录和可执行程序。
@@ -55,4 +68,3 @@
 - 验证 sidecar 超时、损坏、版本不兼容时只影响 Token 模块，不拖垮前台时长采集。
 - 运行 Rust、.NET、Node 和前端检查，并在真实 Codex、ZCode 环境验收；Harness 接通后补做真实 V4 Flash 对照。
 - 更新 README、需求文档和交接文档，记录发现优先级、手动覆盖、来源状态、隐私边界、第三方许可及 v0.7.0 变更；保留 `server/config.example.json`。
-

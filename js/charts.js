@@ -10,9 +10,9 @@
  * 为每张点阵图独立建立比例色阶。
  * 使用最近秩 P95 作为满色上限，避免极少数异常高值压暗其余日期。
  */
-function buildHeatmapScale(days) {
+function buildHeatmapScale(days, valueKey = 'minutes') {
   const values = days
-    .map(day => day && day.minutes)
+    .map(day => day && day[valueKey])
     .filter(minutes => Number.isFinite(minutes) && minutes > 0)
     .sort((a, b) => a - b);
   const capMinutes = values.length
@@ -80,15 +80,18 @@ const Charts = (() => {
    * days: [{date:Date, minutes:Number}]（minutes 为 null 表示未来日期）
    * 分档：每张图按自身有效数据的 P95 独立建立比例色阶
    * ============================================================ */
-  function heatmap(container, days) {
+  function heatmap(container, days, config = {}) {
     container.innerHTML = '';
+    const valueKey = config.valueKey || 'minutes';
+    const valueLabel = config.valueLabel || '使用时长';
+    const formatValue = config.formatValue || fmtMin;
     const cell = 11, gap = 3, rows = 7, left = 30, top = 18;
     const n = days.length;
     const firstDow = days[0].date.getDay();
     const cols = Math.ceil((firstDow + n) / rows);
     const W = left + cols * (cell + gap) + 8;
     const H = top + rows * (cell + gap) + 2;
-    const scale = buildHeatmapScale(days);
+    const scale = buildHeatmapScale(days, valueKey);
 
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'hm-svg' });
     svg.style.width = '100%';
@@ -122,7 +125,8 @@ const Charts = (() => {
         const idx = c * 7 + r - firstDow;
         if (idx < 0 || idx >= n) continue;
         const d = days[idx];
-        const lv = scale.level(d.minutes);
+        const value = d[valueKey];
+        const lv = scale.level(value);
         const rect = el('rect', {
           x: left + c * (cell + gap), y: top + r * (cell + gap),
           width: cell, height: cell, rx: 2.5,
@@ -131,9 +135,9 @@ const Charts = (() => {
         if (lv === 0) rect.setAttribute('stroke', '#21262d');
         rect.style.animationDelay = Math.min(c * 14 + r * 12, 1100) + 'ms';
         rect.addEventListener('mouseenter', e => {
-          const tip = d.minutes == null
+          const tip = value == null
             ? `<span class="tip-date">${fmtDate(d.date)}</span><br><b>暂无数据</b> · 未来日期`
-            : `<span class="tip-date">${fmtDate(d.date)}</span><br><b>${fmtMin(d.minutes)}</b> · 使用时长`;
+            : `<span class="tip-date">${fmtDate(d.date)}</span><br><b>${escapeHTML(formatValue(value))}</b> · ${escapeHTML(valueLabel)}`;
           showTip(tip, e.clientX, e.clientY);
         });
         rect.addEventListener('mousemove', e => moveTip(e.clientX, e.clientY));
@@ -151,6 +155,7 @@ const Charts = (() => {
   function line(container, cfg) {
     container.innerHTML = '';
     const { labels, values, unit } = cfg;
+    const rawValues = Array.isArray(cfg.rawValues) ? cfg.rawValues : values;
     const color = safeColor(cfg.color);
     const W = 640, H = cfg.height || 180, P = { l: 38, r: 12, t: 14, b: 24 };
     const n = values.length;
@@ -231,7 +236,10 @@ const Charts = (() => {
       dot.style.opacity = 1;
       if (i !== lastIdx) {   // 仅在数据点变化时重建内容，移动时只重定位
         lastIdx = i;
-        showTip(`<span class="tip-date">${escapeHTML(labels[i])}</span><br><b>${escapeHTML(values[i])}${escapeHTML(unit)}</b>`, e.clientX, e.clientY);
+        const displayed = typeof cfg.valueFormatter === 'function'
+          ? cfg.valueFormatter(rawValues[i])
+          : `${values[i]}${unit}`;
+        showTip(`<span class="tip-date">${escapeHTML(labels[i])}</span><br><b>${escapeHTML(displayed)}</b>`, e.clientX, e.clientY);
       } else {
         moveTip(e.clientX, e.clientY);
       }

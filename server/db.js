@@ -2,6 +2,8 @@
  * Simmer Server · 数据库层（SQLite）
  *  - usage_minutes：逐分钟前台软件记录（每行 = 某设备某分钟在某软件）
  *  - devices：设备注册表
+ *  - ai_token_events：请求级 AI Token 数字事件（不保存对话内容或本地路径）
+ *  - ai_source_status：各设备的本地 AI 来源发现状态
  *  - ts 为采集端本地时间字符串 'YYYY-MM-DDTHH:MM'，便于字符串比较聚合
  * ============================================================ */
 const Database = require('better-sqlite3');
@@ -32,6 +34,36 @@ CREATE TABLE IF NOT EXISTS dashboard_settings (
   data_json   TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ai_token_events (
+  device_id          TEXT NOT NULL,
+  source             TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh')),
+  source_event_id    TEXT NOT NULL,
+  provider           TEXT NOT NULL DEFAULT '',
+  model              TEXT NOT NULL DEFAULT '',
+  occurred_at        TEXT NOT NULL,
+  input_tokens       INTEGER NOT NULL CHECK (input_tokens >= 0),
+  output_tokens      INTEGER NOT NULL CHECK (output_tokens >= 0),
+  cache_read_tokens  INTEGER NOT NULL CHECK (cache_read_tokens >= 0),
+  cache_write_tokens INTEGER NOT NULL CHECK (cache_write_tokens >= 0),
+  reasoning_tokens   INTEGER NOT NULL CHECK (reasoning_tokens >= 0),
+  total_tokens       INTEGER NOT NULL CHECK (total_tokens >= 0),
+  parser_version     TEXT NOT NULL DEFAULT '',
+  received_at        TEXT NOT NULL,
+  PRIMARY KEY (device_id, source, source_event_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_ai_token_events_occurred
+  ON ai_token_events (occurred_at, device_id);
+CREATE INDEX IF NOT EXISTS idx_ai_token_events_dimensions
+  ON ai_token_events (source, provider, model);
+CREATE TABLE IF NOT EXISTS ai_source_status (
+  device_id       TEXT NOT NULL,
+  source          TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh')),
+  state           TEXT NOT NULL,
+  detail_code     TEXT NOT NULL DEFAULT '',
+  checked_at      TEXT NOT NULL,
+  parser_version  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (device_id, source)
+) WITHOUT ROWID;
 `);
 
 module.exports = db;

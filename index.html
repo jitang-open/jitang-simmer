@@ -33,6 +33,10 @@
         <svg viewBox="0 0 24 24"><path d="M11 2v20C5.9 21.3 2 17 2 12S5.9 2.7 11 2zm2 0v9h9c-.5-4.8-4.2-8.5-9-9zm0 11v9c4.8-.5 8.5-4.2 9-9h-9z"/></svg>
         时长分布
       </a>
+      <a href="#sec-tokens" class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v1h1a3 3 0 013 3v5a3 3 0 01-3 3h-1v3h-2v-3H9v3H7v-3H6a3 3 0 01-3-3v-5a3 3 0 013-3h1V7a5 5 0 015-5zm0 2a3 3 0 00-3 3v1h6V7a3 3 0 00-3-3zm-4 8a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/></svg>
+        AI Tokens
+      </a>
       <a href="#sec-hardware" class="nav-item">
         <svg viewBox="0 0 24 24"><path d="M13 3L4 14h6v7l9-11h-6V3z"/></svg>
         硬件监控
@@ -47,7 +51,7 @@
 
     <div class="side-foot">
       <span class="dot-live"></span> 数据采集运行中<br>
-      <span class="side-ver">v0.3.0 · Mock Data</span>
+      <span class="side-ver">v0.7.0 · Local Data</span>
     </div>
   </aside>
 
@@ -130,6 +134,47 @@
       </section>
     </div>
 
+    <!-- AI Token 统计 -->
+    <section class="card fade-up" id="sec-tokens">
+      <div class="card-head token-head">
+        <div>
+          <h2>AI Tokens</h2>
+          <p class="card-sub" id="tokenSub">Codex、ZCode 与 DeepSeek Harness 的本地请求级统计</p>
+        </div>
+        <div class="token-filters">
+          <label>来源<select id="tokenSourceFilter"><option value="">全部</option></select></label>
+          <label>Provider<select id="tokenProviderFilter"><option value="">全部</option></select></label>
+          <label>模型<select id="tokenModelFilter"><option value="">全部</option></select></label>
+        </div>
+      </div>
+      <div class="token-statuses" id="tokenStatuses"></div>
+      <div class="token-summary" id="tokenSummary"></div>
+      <div class="token-empty" id="tokenEmpty" hidden></div>
+      <div class="token-chart-grid">
+        <div class="token-panel token-panel-wide">
+          <div class="token-panel-title">年度 Token 活跃度 <span id="tokenYearHint"></span></div>
+          <div id="tokenHeatmap" class="hm-wrap"></div>
+          <div class="hm-legend">
+            <span>Less</span>
+            <i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><i class="lv5"></i><i class="lv6"></i><i class="lv7"></i><i class="lv8"></i><i class="lv9"></i>
+            <span>More</span>
+          </div>
+        </div>
+        <div class="token-panel token-panel-wide">
+          <div class="token-panel-title">Token 趋势 <span id="tokenTrendHint"></span></div>
+          <div id="tokenTrend"></div>
+        </div>
+        <div class="token-panel">
+          <div class="token-panel-title">来源排行</div>
+          <div id="tokenSourceRank" class="token-ranks"></div>
+        </div>
+        <div class="token-panel">
+          <div class="token-panel-title">模型排行</div>
+          <div id="tokenModelRank" class="token-ranks"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- 硬件参数 -->
     <section class="fade-up" id="sec-hardware">
       <div class="sec-title">
@@ -156,7 +201,7 @@
     </section>
 
     <footer class="foot">
-      Jitang Simmer · 鸡汤电脑统计 · 当前所有数据为演示用假数据，接入真实采集后端后自动替换
+      Jitang Simmer · 鸡汤电脑统计 · 数据保存在本机 SQLite，AI 模块仅保存数字用量元数据
     </footer>
   </main>
 </div>

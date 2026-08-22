@@ -10,6 +10,7 @@ internal class TrayContext : ApplicationContext
 {
     private readonly Config _cfg;
     private readonly LocalStore _store;
+    private readonly TokenScannerManager _tokenScanner;
     private readonly MinuteAggregator _aggregator = new();
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _menu = new();
@@ -27,11 +28,13 @@ internal class TrayContext : ApplicationContext
     {
         _cfg = Config.Load();
         _store = new LocalStore();
+        _tokenScanner = new TokenScannerManager(_cfg);
         _ = _uiSync.Handle;                            // 立即创建句柄，使 BeginInvoke 可用
 
         var menu = _menu;
         menu.Items.Add("暂停统计", null, (s, e) => TogglePause());
         menu.Items.Add("立即上报", null, async (s, e) => await UploadNow());
+        menu.Items.Add("重新扫描 AI Tokens", null, async (s, e) => await ScanTokensNow());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("设置…", null, (s, e) => ShowSettings());
         menu.Items.Add("打开数据文件夹", null, (s, e) => OpenDataFolder());
@@ -145,6 +148,7 @@ internal class TrayContext : ApplicationContext
     private void TogglePause()
     {
         _paused = !_paused;
+        _tokenScanner.SetPaused(_paused);
         _tray.Icon = MakeIcon(_paused);
         _tray.ShowBalloonTip(1500, "Simmer 采集器", _paused ? "统计已暂停" : "统计已恢复", ToolTipIcon.Info);
         UpdateTooltip(_paused ? "手动暂停" : "已恢复");
@@ -159,7 +163,15 @@ internal class TrayContext : ApplicationContext
         {
             _cfg.Save();
             _tray.ShowBalloonTip(1500, "Simmer 采集器", "配置已保存", ToolTipIcon.Info);
+            _ = _tokenScanner.ScanNowAsync();
         }
+    }
+
+    private async Task ScanTokensNow()
+    {
+        UpdateTooltip("正在扫描 AI Tokens");
+        await _tokenScanner.ScanNowAsync();
+        UpdateTooltip($"Token 扫描完成，待上报 {_tokenScanner.PendingCount} 条");
     }
 
     private static void OpenDataFolder() =>
@@ -175,6 +187,7 @@ internal class TrayContext : ApplicationContext
         if (rec != null) _store.Enqueue(rec);
         _sampleTimer.Dispose();
         _uploadTimer.Dispose();
+        _tokenScanner.Dispose();
         _tray.Visible = false;
         Application.Exit();
     }
@@ -203,6 +216,10 @@ internal class SettingsForm : Form
     private readonly TextBox _txtToken = new() { Top = 60, Left = 110, Width = 260 };
     private readonly TextBox _txtName = new() { Top = 90, Left = 110, Width = 260 };
     private readonly NumericUpDown _numIdle = new() { Top = 120, Left = 110, Width = 80, Minimum = 1, Maximum = 60 };
+    private readonly CheckBox _chkTokens = new() { Top = 150, Left = 110, Width = 220, Text = "启用 AI Token 统计" };
+    private readonly TextBox _txtCodex = new() { Top = 180, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
+    private readonly TextBox _txtZCode = new() { Top = 210, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
+    private readonly TextBox _txtDsh = new() { Top = 240, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
 
     public SettingsForm(Config cfg)
     {
@@ -211,31 +228,59 @@ internal class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(400, 190);
+        ClientSize = new Size(420, 325);
 
         void Label(string text, int top) =>
             Controls.Add(new Label { Text = text, AutoSize = true, Top = top + 3, Left = 15 });
 
         Label("服务器地址", 30); Label("上报 Token", 60); Label("设备名称", 90); Label("空闲阈值(分钟)", 120);
+        Label("Codex 数据目录", 180); Label("ZCode 数据目录", 210); Label("DSH 数据目录", 240);
 
         _txtUrl.Text = cfg.ServerUrl;
         _txtToken.Text = cfg.Token;
         _txtName.Text = cfg.DeviceName;
         _numIdle.Value = cfg.IdleThresholdMinutes;
-        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle]);
+        _chkTokens.Checked = cfg.EnableTokenStatistics;
+        _txtCodex.Text = cfg.CodexHome;
+        _txtZCode.Text = cfg.ZCodeHome;
+        _txtDsh.Text = cfg.DshHome;
+        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh]);
+        AddBrowseButton(_txtCodex, 180);
+        AddBrowseButton(_txtZCode, 210);
+        AddBrowseButton(_txtDsh, 240);
 
-        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 150, Left = 210, Width = 85 };
-        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 150, Left = 305, Width = 80 };
+        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 280, Left = 230, Width = 85 };
+        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 280, Left = 325, Width = 80 };
         ok.Click += (s, e) =>
         {
             cfg.ServerUrl = _txtUrl.Text.Trim();
             cfg.Token = _txtToken.Text.Trim();
             cfg.DeviceName = _txtName.Text.Trim();
             cfg.IdleThresholdMinutes = (int)_numIdle.Value;
+            cfg.EnableTokenStatistics = _chkTokens.Checked;
+            cfg.CodexHome = _txtCodex.Text.Trim();
+            cfg.ZCodeHome = _txtZCode.Text.Trim();
+            cfg.DshHome = _txtDsh.Text.Trim();
         };
         Controls.Add(ok);
         Controls.Add(cancel);
         AcceptButton = ok;
         CancelButton = cancel;
+    }
+
+    private void AddBrowseButton(TextBox target, int top)
+    {
+        var button = new Button { Text = "选择…", Top = top - 1, Left = 335, Width = 70, Height = 25 };
+        button.Click += (_, _) =>
+        {
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = "选择 AI 工具的数据根目录",
+                UseDescriptionForTitle = true,
+                SelectedPath = Directory.Exists(target.Text) ? target.Text : "",
+            };
+            if (dialog.ShowDialog(this) == DialogResult.OK) target.Text = dialog.SelectedPath;
+        };
+        Controls.Add(button);
     }
 }

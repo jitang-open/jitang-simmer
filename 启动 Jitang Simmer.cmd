@@ -5,6 +5,7 @@ set "ROOT=%~dp0"
 set "NODE22=C:\Users\jitang\.local\nodejs\node.exe"
 set "SERVER=%ROOT%server\index.js"
 set "COLLECTOR=%ROOT%collector\SimmerCollector.exe"
+set "TOKEN_SCANNER=%ROOT%collector\simmer-token-scan.exe"
 set "DASHBOARD=http://127.0.0.1:8788/index.html"
 
 if not exist "%NODE22%" (
@@ -26,6 +27,11 @@ if not exist "%SERVER%" (
 if not exist "%COLLECTOR%" (
   echo [Jitang Simmer] Collector was not found: %COLLECTOR%
   goto :failed
+)
+
+if not exist "%TOKEN_SCANNER%" (
+  echo [Jitang Simmer] Warning: AI Token scanner was not found.
+  echo [Jitang Simmer] Software time collection will still start; run collector\build.ps1 to enable Token Statistics.
 )
 
 call :check_server
