@@ -23,18 +23,47 @@ test.after(async () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-function get(pathname) {
+function request(pathname, { method = 'GET', body } = {}) {
   const { port } = server.address();
   return new Promise((resolve, reject) => {
-    http.get({ hostname: '127.0.0.1', port, path: pathname }, res => {
-      res.resume();
-      res.on('end', () => resolve(res.statusCode));
-    }).on('error', reject);
+    const payload = body === undefined ? null : JSON.stringify(body);
+    const req = http.request({
+      hostname: '127.0.0.1', port, path: pathname, method,
+      headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+    }, res => {
+      let responseBody = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { responseBody += chunk; });
+      res.on('end', () => {
+        const isJson = String(res.headers['content-type'] || '').includes('application/json');
+        resolve({
+          status: res.statusCode,
+          body: responseBody ? (isJson ? JSON.parse(responseBody) : responseBody) : null,
+        });
+      });
+    });
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
   });
 }
 
 test('只托管前端白名单路径，不暴露配置和数据库', async () => {
-  assert.equal(await get('/index.html'), 200);
-  assert.equal(await get('/server/config.json'), 404);
-  assert.equal(await get('/server/data/simmer.db'), 404);
+  assert.equal((await request('/index.html')).status, 200);
+  assert.equal((await request('/server/config.json')).status, 404);
+  assert.equal((await request('/server/data/simmer.db')).status, 404);
+});
+
+test('面板设置持久化到 SQLite 并可跨浏览器读取', async () => {
+  assert.equal((await request('/api/settings')).body.settings, null);
+  const settings = {
+    whitelist: ['Code.exe'],
+    customApps: [{ id: 'Code.exe', name: 'Code', icon: '🧩', color: '#3b82f6', category: '开发工具' }],
+    removedApps: [],
+    offApps: ['chrome.exe'],
+  };
+  const saved = await request('/api/settings', { method: 'PUT', body: settings });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await request('/api/settings')).body.settings, settings);
+  assert.equal((await request('/api/settings', { method: 'PUT', body: { whitelist: [] } })).status, 400);
 });

@@ -34,8 +34,8 @@ const LiveDB = (() => {
   const meta = exe => APP_META[exe] ||
     { name: exe.replace(/\.exe$/i, ''), icon: '📦', color: '#8b949e', category: '其他' };
 
-  async function j(path) {
-    const r = await fetch(BASE + path);
+  async function j(path, options) {
+    const r = await fetch(BASE + path, options);
     if (!r.ok) throw new Error('http ' + r.status);
     return r.json();
   }
@@ -44,8 +44,8 @@ const LiveDB = (() => {
     (Array.isArray(appIds) ? `&apps=${encodeURIComponent(appIds.join(','))}` : '');
 
   async function create() {
-    const [devicesRaw, range, totals] = await Promise.all([
-      j('/api/devices'), j('/api/range'), j('/api/app-totals?range=total'),
+    const [devicesRaw, range, totals, settingsRaw] = await Promise.all([
+      j('/api/devices'), j('/api/range'), j('/api/app-totals?range=total'), j('/api/settings'),
     ]);
     if (!devicesRaw.length) throw new Error('后端暂无设备数据');
 
@@ -60,6 +60,12 @@ const LiveDB = (() => {
       apps: totals.map(r => ({ id: r.id, ...meta(r.id) })),
       devices: devicesRaw.map(d => ({ id: d.id, name: d.name, host: d.id, os: '' })),
       metricDefs: [],                                    // 硬件指标 M1.5 支持
+      serverSettings: settingsRaw.settings,
+      saveSettings: settings => j('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      }),
       yearSeries: (device, appIds, year) =>
         j(`/api/year?${q(device, appIds)}&year=${year}`)
           .then(rows => rows.map(r => ({ date: new Date(r.date), minutes: r.minutes }))),

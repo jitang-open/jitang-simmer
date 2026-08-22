@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS usage_minutes (
   app         TEXT NOT NULL,
   PRIMARY KEY (device_id, ts, app)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS dashboard_settings (
+  settings_id INTEGER PRIMARY KEY CHECK (settings_id = 1),
+  data_json   TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
 `);
 
 module.exports = db;

@@ -7,6 +7,7 @@
  *  - GET  /api/app-totals?device=&range=&apps= 软件时长合计
  *  - GET  /api/app-weekday?device=&app=        单软件星期分布
  *  - GET  /api/range                           数据日期范围（SRV-04）
+ *  - GET/PUT /api/settings                     白名单与软件元数据（SRV-05）
  *  - 静态托管前端（http://localhost:8788/ 直接真数据预览）
  * ============================================================ */
 const express = require('express');
@@ -81,6 +82,69 @@ app.get('/api/app-totals', (req, res) =>
 app.get('/api/app-weekday', (req, res) =>
   res.json(agg.appWeekday(req.query.device || 'all', req.query.app || '')));
 app.get('/api/range', (req, res) => res.json(agg.rangeInfo()));
+
+/* ---------- 单用户面板设置（SQLite 为唯一数据源，localStorage 仅作缓存） ---------- */
+const getSettings = db.prepare(
+  'SELECT data_json, updated_at FROM dashboard_settings WHERE settings_id = 1'
+);
+const upsertSettings = db.prepare(`
+  INSERT INTO dashboard_settings (settings_id, data_json, updated_at) VALUES (1, ?, ?)
+  ON CONFLICT(settings_id) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+`);
+
+const validStringArray = value => Array.isArray(value) && value.length <= 2000 &&
+  value.every(item => typeof item === 'string' && item.length > 0 && item.length <= 260);
+
+function normalizeSettings(value) {
+  if (!value || typeof value !== 'object') return null;
+  const { whitelist, customApps, removedApps, offApps } = value;
+  if (!validStringArray(whitelist) || !validStringArray(removedApps) || !validStringArray(offApps) ||
+      !Array.isArray(customApps) || customApps.length > 1000) return null;
+
+  const normalizedApps = [];
+  const appIds = new Set();
+  for (const appRow of customApps) {
+    if (!appRow || typeof appRow !== 'object' ||
+        typeof appRow.id !== 'string' || !appRow.id || appRow.id.length > 260 ||
+        typeof appRow.name !== 'string' || appRow.name.length > 200 ||
+        typeof appRow.icon !== 'string' || appRow.icon.length > 32 ||
+        typeof appRow.category !== 'string' || appRow.category.length > 50 ||
+        typeof appRow.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(appRow.color)) return null;
+    if (appIds.has(appRow.id)) continue;
+    appIds.add(appRow.id);
+    normalizedApps.push({
+      id: appRow.id,
+      name: appRow.name,
+      icon: appRow.icon,
+      color: appRow.color,
+      category: appRow.category,
+    });
+  }
+  return {
+    whitelist: [...new Set(whitelist)],
+    customApps: normalizedApps,
+    removedApps: [...new Set(removedApps)],
+    offApps: [...new Set(offApps)],
+  };
+}
+
+app.get('/api/settings', (req, res) => {
+  const row = getSettings.get();
+  if (!row) return res.json({ settings: null, updatedAt: null });
+  try {
+    return res.json({ settings: JSON.parse(row.data_json), updatedAt: row.updated_at });
+  } catch {
+    return res.status(500).json({ error: 'settings_corrupted' });
+  }
+});
+
+app.put('/api/settings', (req, res) => {
+  const settings = normalizeSettings(req.body);
+  if (!settings) return res.status(400).json({ error: 'invalid_settings' });
+  const updatedAt = new Date().toISOString();
+  upsertSettings.run(JSON.stringify(settings), updatedAt);
+  res.json({ ok: true, settings, updatedAt });
+});
 
 /* ---------- 静态托管前端（严格白名单，禁止暴露 server/config.json 与数据库） ---------- */
 const WEB_ROOT = path.join(__dirname, '..');

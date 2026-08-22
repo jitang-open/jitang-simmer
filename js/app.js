@@ -10,6 +10,10 @@ const safeColor = value => /^#[0-9a-f]{6}$/i.test(String(value)) ? String(value)
 
 
 let DB = MockDB;   // 启动时尝试切换为 LiveDB（见 DOMContentLoaded）
+let settingsSyncReady = false;
+let settingsSaveQueued = false;
+let settingsSaveRunning = false;
+let settingsDirty = false;
 
 /* ---------------- localStorage 统一读写层（所有持久化必经之路） ----------------
  * 键名一律内联字面量、不依赖任何外部常量——彻底免疫"常量声明在 state
@@ -34,7 +38,10 @@ function loadWhitelist() {
   if (Array.isArray(saved)) return new Set(saved);   // 原样恢复，不做清单过滤（live/mock 两套命名体系）
   return new Set(MockDB.apps.map(a => a.id));
 }
-function saveWhitelist() { saveJSON('simmer.whitelist', [...state.whitelist]); }
+function saveWhitelist() {
+  saveJSON('simmer.whitelist', [...state.whitelist]);
+  queueServerSettingsSave();
+}
 
 function loadCustomApps() {
   const a = loadJSON('simmer.apps', []);
@@ -52,6 +59,7 @@ function saveAppsState() {
   saveJSON('simmer.apps', state.customApps);
   saveJSON('simmer.appsRemoved', [...state.removedApps]);
   saveJSON('simmer.appsOff', [...state.offApps]);
+  queueServerSettingsSave();
 }
 
 const state = {
@@ -67,6 +75,71 @@ const state = {
 
 const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', total: '累计' };
 const wlIds = () => [...state.whitelist];
+
+function settingsPayload() {
+  return {
+    whitelist: [...state.whitelist],
+    customApps: state.customApps.map(appRow => ({ ...appRow })),
+    removedApps: [...state.removedApps],
+    offApps: [...state.offApps],
+  };
+}
+
+function applySettings(settings) {
+  state.whitelist = new Set(settings.whitelist);
+  state.customApps = settings.customApps.map(appRow => ({ ...appRow }));
+  state.removedApps = new Set(settings.removedApps);
+  state.offApps = new Set(settings.offApps);
+}
+
+function hasMeaningfulSettings(settings) {
+  return settings.whitelist.length > 0 || settings.customApps.length > 0 ||
+    settings.removedApps.length > 0 || settings.offApps.length > 0;
+}
+
+function mergeSettings(serverSettings, localSettings) {
+  const customApps = new Map(serverSettings.customApps.map(appRow => [appRow.id, appRow]));
+  localSettings.customApps.forEach(appRow => customApps.set(appRow.id, appRow));
+  const removedApps = new Set([...serverSettings.removedApps, ...localSettings.removedApps]);
+  const offApps = new Set([...serverSettings.offApps, ...localSettings.offApps]);
+  const whitelist = new Set([...serverSettings.whitelist, ...localSettings.whitelist]);
+  removedApps.forEach(id => { whitelist.delete(id); offApps.delete(id); customApps.delete(id); });
+  offApps.forEach(id => whitelist.delete(id));
+  return {
+    whitelist: [...whitelist],
+    customApps: [...customApps.values()].map(appRow => ({ ...appRow })),
+    removedApps: [...removedApps],
+    offApps: [...offApps],
+  };
+}
+
+function queueServerSettingsSave() {
+  if (!settingsSyncReady || !DB.live || typeof DB.saveSettings !== 'function') return;
+  settingsDirty = true;
+  if (settingsSaveQueued || settingsSaveRunning) return;
+  settingsSaveQueued = true;
+  queueMicrotask(() => {
+    settingsSaveQueued = false;
+    void flushServerSettings();
+  });
+}
+
+async function flushServerSettings() {
+  if (settingsSaveRunning) return;
+  settingsSaveRunning = true;
+  try {
+    while (settingsDirty) {
+      settingsDirty = false;
+      await DB.saveSettings(settingsPayload());
+      localStorage.setItem('simmer.settingsBackendVersion', '1');
+    }
+  } catch (e) {
+    console.error('[simmer] 后端设置同步失败，本地缓存已保留：', e);
+  } finally {
+    settingsSaveRunning = false;
+    if (settingsDirty) queueServerSettingsSave();
+  }
+}
 
 /* ---------------- 软件清单：分类 / 色板 / 合并与覆盖 ---------------- */
 const CATEGORIES = ['开发工具', '浏览器', '游戏', '社交', '音乐', '设计', '效率', '系统', '其他'];
@@ -611,22 +684,44 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const live = await LiveDB.create();
     DB = live;
-    // 白名单适配规则：
-    //   首次访问 / 旧数据体系迁移 → 空白名单，由用户在「＋ 添加」中自主挑选
-    //   已有存储 → 与当前软件清单取交集（用户关掉/删除的不复活）
-    // 新检测到的进程永远不自动入名单，只出现在「添加软件」候选列表中。
+    // 每个旧浏览器只合并迁移一次；完成标记后，SQLite 是唯一数据源。
     const saved = localStorage.getItem('simmer.whitelist') !== null;
-    const ids = new Set(DB.apps.map(a => a.id));
-    const stored = [...state.whitelist];
-    const kept = stored.filter(id => ids.has(id));
-    const migrate = stored.length > 0 && kept.length === 0;   // 存了名单但全部失配 = 跨体系迁移
-    if (!saved || migrate) {
-      state.whitelist = new Set();
-      state.offApps = new Set();
-      saveWhitelist(); saveAppsState();
+    const migrated = localStorage.getItem('simmer.settingsBackendVersion') === '1';
+    const localSettings = settingsPayload();
+    const localMeaningful = saved && hasMeaningfulSettings(localSettings);
+    let shouldPersistMigration = false;
+    if (DB.serverSettings) {
+      const selected = !migrated && localMeaningful
+        ? mergeSettings(DB.serverSettings, localSettings)
+        : DB.serverSettings;
+      applySettings(selected);
+      shouldPersistMigration = !migrated && localMeaningful;
     } else {
-      state.whitelist = new Set(kept);
-      state.offApps = new Set([...state.offApps].filter(id => ids.has(id)));
+      const ids = new Set([...DB.apps.map(a => a.id), ...state.customApps.map(a => a.id)]);
+      const stored = [...state.whitelist];
+      const kept = stored.filter(id => ids.has(id));
+      const migrate = stored.length > 0 && kept.length === 0;
+      if (!saved || migrate) {
+        state.whitelist = new Set();
+        state.offApps = new Set();
+      } else {
+        state.whitelist = new Set(kept);
+        state.offApps = new Set([...state.offApps].filter(id => ids.has(id)));
+      }
+      shouldPersistMigration = hasMeaningfulSettings(settingsPayload());
+    }
+    // 回写当前 origin 的缓存时同步尚未启用，不会触发多余请求。
+    saveWhitelist(); saveAppsState();
+    settingsSyncReady = true;
+    if (shouldPersistMigration) {
+      try {
+        await DB.saveSettings(settingsPayload());
+        localStorage.setItem('simmer.settingsBackendVersion', '1');
+      } catch (e) {
+        console.error('[simmer] 旧浏览器设置迁移失败，将在下次加载时重试：', e);
+      }
+    } else if (DB.serverSettings) {
+      localStorage.setItem('simmer.settingsBackendVersion', '1');
     }
     document.querySelector('.topbar .sub').textContent = 'Jitang Simmer · ● 实时数据';
   } catch (e) {
