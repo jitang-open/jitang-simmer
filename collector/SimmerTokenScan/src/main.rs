@@ -5,11 +5,12 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tokscale_core::sessions::{
-    codex::parse_codex_file, dsh::parse_dsh_file, zcode::parse_zcode_sqlite, UnifiedMessage,
+    codex::parse_codex_file, dsh::parse_dsh_file, workbuddy::parse_workbuddy_file,
+    zcode::parse_zcode_sqlite, UnifiedMessage,
 };
 use walkdir::WalkDir;
 
-const PARSER_VERSION: &str = "tokscale-b069c85";
+const PARSER_VERSION: &str = "tokscale-b069c85-wb1";
 const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 #[derive(Default)]
@@ -17,6 +18,7 @@ struct Options {
     codex_root: Option<PathBuf>,
     zcode_root: Option<PathBuf>,
     dsh_root: Option<PathBuf>,
+    workbuddy_root: Option<PathBuf>,
     modified_since_ms: Option<u128>,
 }
 
@@ -51,6 +53,7 @@ struct Diagnostics {
     codex_files: usize,
     zcode_databases: usize,
     dsh_files: usize,
+    work_buddy_files: usize,
     skipped_invalid_events: usize,
 }
 
@@ -76,11 +79,17 @@ fn run() -> Result<ScanResult, String> {
 
     if let Some(root) = options.codex_root.as_deref() {
         for directory in [root.join("sessions"), root.join("archived_sessions")] {
-            for file in files_named(&directory, |path| {
-                path.extension().and_then(|value| value.to_str()) == Some("jsonl")
-            }, options.modified_since_ms) {
+            for file in files_named(
+                &directory,
+                |path| path.extension().and_then(|value| value.to_str()) == Some("jsonl"),
+                options.modified_since_ms,
+            ) {
                 diagnostics.codex_files += 1;
-                messages.extend(parse_codex_file(&file).into_iter().map(|message| ("codex".into(), message)));
+                messages.extend(
+                    parse_codex_file(&file)
+                        .into_iter()
+                        .map(|message| ("codex".into(), message)),
+                );
             }
         }
     }
@@ -89,17 +98,48 @@ fn run() -> Result<ScanResult, String> {
         let database = root.join("cli").join("db").join("db.sqlite");
         if database.is_file() {
             diagnostics.zcode_databases = 1;
-            messages.extend(parse_zcode_sqlite(&database).into_iter().map(|message| ("zcode".into(), message)));
+            messages.extend(
+                parse_zcode_sqlite(&database)
+                    .into_iter()
+                    .map(|message| ("zcode".into(), message)),
+            );
         }
     }
 
     if let Some(root) = options.dsh_root.as_deref() {
         let sessions = root.join("sessions");
-        for file in files_named(&sessions, |path| {
-            matches!(path.file_name().and_then(|value| value.to_str()), Some("session.jsonl") | Some("session.jsonl.zstd"))
-        }, options.modified_since_ms) {
+        for file in files_named(
+            &sessions,
+            |path| {
+                matches!(
+                    path.file_name().and_then(|value| value.to_str()),
+                    Some("session.jsonl") | Some("session.jsonl.zstd")
+                )
+            },
+            options.modified_since_ms,
+        ) {
             diagnostics.dsh_files += 1;
-            messages.extend(parse_dsh_file(&file).into_iter().map(|message| ("dsh".into(), message)));
+            messages.extend(
+                parse_dsh_file(&file)
+                    .into_iter()
+                    .map(|message| ("dsh".into(), message)),
+            );
+        }
+    }
+
+    if let Some(root) = options.workbuddy_root.as_deref() {
+        let projects = root.join("projects");
+        for file in files_named(
+            &projects,
+            |path| path.extension().and_then(|value| value.to_str()) == Some("jsonl"),
+            options.modified_since_ms,
+        ) {
+            diagnostics.work_buddy_files += 1;
+            messages.extend(
+                parse_workbuddy_file(&file)
+                    .into_iter()
+                    .map(|message| ("workbuddy".into(), message)),
+            );
         }
     }
 
@@ -118,7 +158,11 @@ fn run() -> Result<ScanResult, String> {
             .then_with(|| left.source_event_id.cmp(&right.source_event_id))
     });
 
-    Ok(ScanResult { parser_version: PARSER_VERSION, events, diagnostics })
+    Ok(ScanResult {
+        parser_version: PARSER_VERSION,
+        events,
+        diagnostics,
+    })
 }
 
 fn parse_options() -> Result<Options, String> {
@@ -129,9 +173,18 @@ fn parse_options() -> Result<Options, String> {
             "--codex-root" => options.codex_root = Some(required_path(&mut args, &argument)?),
             "--zcode-root" => options.zcode_root = Some(required_path(&mut args, &argument)?),
             "--dsh-root" => options.dsh_root = Some(required_path(&mut args, &argument)?),
+            "--workbuddy-root" => {
+                options.workbuddy_root = Some(required_path(&mut args, &argument)?)
+            }
             "--modified-since-ms" => {
-                let value = args.next().ok_or_else(|| format!("missing_value:{argument}"))?;
-                options.modified_since_ms = Some(value.parse().map_err(|_| "invalid_modified_since".to_string())?);
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("missing_value:{argument}"))?;
+                options.modified_since_ms = Some(
+                    value
+                        .parse()
+                        .map_err(|_| "invalid_modified_since".to_string())?,
+                );
             }
             "--version" => {
                 println!("{PARSER_VERSION}");
@@ -143,8 +196,13 @@ fn parse_options() -> Result<Options, String> {
     Ok(options)
 }
 
-fn required_path(args: &mut impl Iterator<Item = String>, argument: &str) -> Result<PathBuf, String> {
-    args.next().map(PathBuf::from).ok_or_else(|| format!("missing_value:{argument}"))
+fn required_path(
+    args: &mut impl Iterator<Item = String>,
+    argument: &str,
+) -> Result<PathBuf, String> {
+    args.next()
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("missing_value:{argument}"))
 }
 
 fn files_named(
@@ -161,7 +219,9 @@ fn files_named(
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_file() && predicate(entry.path()))
         .filter(|entry| {
-            let Some(cutoff) = modified_since_ms else { return true };
+            let Some(cutoff) = modified_since_ms else {
+                return true;
+            };
             entry
                 .metadata()
                 .ok()
@@ -249,7 +309,8 @@ fn civil_from_days(days_since_epoch: i64) -> Option<(i64, i64, i64)> {
     let z = days_since_epoch.checked_add(719_468)?;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let day_of_era = z - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let mut year = year_of_era + era * 400;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_prime = (5 * day_of_year + 2) / 153;
@@ -308,6 +369,22 @@ mod tests {
     #[test]
     fn converts_unix_epoch_and_leap_day_without_external_time_state() {
         assert_eq!(unix_millis_to_iso(0).unwrap(), "1970-01-01T00:00:00.000Z");
-        assert_eq!(unix_millis_to_iso(1_709_164_800_000).unwrap(), "2024-02-29T00:00:00.000Z");
+        assert_eq!(
+            unix_millis_to_iso(1_709_164_800_000).unwrap(),
+            "2024-02-29T00:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn workbuddy_source_is_kept_in_normalized_event_identity() {
+        let event = normalize_message("workbuddy", message("private-session")).unwrap();
+        assert_eq!(event.source, "workbuddy");
+        assert_eq!(event.total_tokens, 150);
+        assert_ne!(
+            event.source_event_id,
+            normalize_message("codex", message("private-session"))
+                .unwrap()
+                .source_event_id
+        );
     }
 }

@@ -9,7 +9,9 @@ $runtimeCollector = Join-Path $collectorRoot 'SimmerCollector.exe'
 
 $cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue
 $cargo = if ($cargoCommand) { $cargoCommand.Source } else {
-    Join-Path $env:LOCALAPPDATA 'SimmerDev\cargo\bin\cargo.exe'
+    $userCargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+    if (Test-Path -LiteralPath $userCargo) { $userCargo }
+    else { Join-Path $env:LOCALAPPDATA 'SimmerDev\cargo\bin\cargo.exe' }
 }
 if (-not (Test-Path -LiteralPath $cargo)) {
     throw '未找到 Cargo。请先安装 Rust，或按交接文档准备项目用 SimmerDev 工具链。'

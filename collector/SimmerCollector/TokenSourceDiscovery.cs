@@ -27,7 +27,13 @@ internal static class TokenSourceDiscovery
                 "dsh",
                 ResolveRoot(config.DshHome, "DSH_HOME", ".dsh"),
                 root => HasFiles(root, ["sessions"], "session.jsonl*") ,
-                ["dsh", "deepseek-harness"], ["DeepSeek Harness", "DSH"]),
+                ["dsh", "deepseek-harness"], ["DeepSeek Harness", "DSH"],
+                HasDshNpxPackage),
+            DiscoverOne(
+                "workbuddy",
+                ResolveRoot(config.WorkBuddyHome, "WORKBUDDY_HOME", ".workbuddy"),
+                root => HasFiles(root, ["projects"], "*.jsonl"),
+                ["workbuddy"], ["WorkBuddy"]),
         ];
     }
 
@@ -36,7 +42,8 @@ internal static class TokenSourceDiscovery
         string root,
         Func<string, bool> dataProbe,
         string[] executableNames,
-        string[] displayNames)
+        string[] displayNames,
+        Func<string, bool>? extraExecutableProbe = null)
     {
         bool hasData;
         try { hasData = dataProbe(root); }
@@ -46,7 +53,7 @@ internal static class TokenSourceDiscovery
         }
 
         bool hasExecutable;
-        try { hasExecutable = HasExecutable(executableNames, displayNames); }
+        try { hasExecutable = HasExecutable(executableNames, displayNames) || extraExecutableProbe?.Invoke(root) == true; }
         catch { hasExecutable = false; }
 
         string state;
@@ -120,6 +127,29 @@ internal static class TokenSourceDiscovery
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// DSH 常通过 npx 启动，进程名因此是 node.exe，PATH 中也没有 dsh.cmd。
+    /// 这里只检查 npm 的固定、有界安装位置，不递归扫描用户磁盘。
+    /// </summary>
+    private static bool HasDshNpxPackage(string _)
+    {
+        string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (File.Exists(Path.Combine(roaming, "npm", "node_modules", "@deepseek-ai", "dsh", "package.json")))
+            return true;
+
+        string npxRoot = Path.Combine(local, "npm-cache", "_npx");
+        if (!Directory.Exists(npxRoot)) return false;
+        try
+        {
+            return Directory.EnumerateDirectories(npxRoot)
+                .Any(directory => File.Exists(Path.Combine(
+                    directory, "node_modules", "@deepseek-ai", "dsh", "package.json")));
+        }
+        catch (UnauthorizedAccessException) { return false; }
+        catch (IOException) { return false; }
     }
 
     private static bool IsRunning(string[] names)

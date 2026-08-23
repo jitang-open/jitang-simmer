@@ -25,6 +25,7 @@ internal sealed class TokenLocalStore
 
     public int Count { get { lock (_lock) return _events.Count; } }
     public DateTimeOffset? LastFullScan { get { lock (_lock) return _lastFullScan; } }
+    public bool HasStatus(string source) { lock (_lock) return _statuses.ContainsKey(source); }
 
     public TokenLocalStore()
     {

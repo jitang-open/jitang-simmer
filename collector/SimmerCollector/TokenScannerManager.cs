@@ -40,27 +40,28 @@ internal sealed class TokenScannerManager : IDisposable
     public async Task ScanNowAsync()
     {
         _scanTimer.Change(ScanInterval(), ScanInterval());
-        await RunSafeAsync("manual");
+        await RunSafeAsync("manual", forceFull: true);
     }
 
     private TimeSpan ScanInterval() =>
         TimeSpan.FromMinutes(Math.Clamp(_config.TokenScanIntervalMinutes, 5, 24 * 60));
 
-    private async Task RunSafeAsync(string reason)
+    private async Task RunSafeAsync(string reason, bool forceFull = false)
     {
         if (_disposed || _paused || !_config.EnableTokenStatistics) return;
         if (!await _scanLock.WaitAsync(0)) return;
-        try { await ScanAndUploadAsync(reason); }
+        try { await ScanAndUploadAsync(reason, forceFull); }
         catch (Exception ex) { Log.Write("Token 扫描流程异常: " + ex.Message); }
         finally { _scanLock.Release(); }
     }
 
-    private async Task ScanAndUploadAsync(string reason)
+    private async Task ScanAndUploadAsync(string reason, bool forceFull)
     {
         var discoveries = TokenSourceDiscovery.Discover(_config);
         RefreshWatchers(discoveries);
-        bool fullScan = !_store.LastFullScan.HasValue ||
-            DateTimeOffset.UtcNow - _store.LastFullScan.Value >= TimeSpan.FromHours(24);
+        bool fullScan = forceFull || !_store.LastFullScan.HasValue ||
+            DateTimeOffset.UtcNow - _store.LastFullScan.Value >= TimeSpan.FromHours(24) ||
+            discoveries.Any(row => !_store.HasStatus(row.Source));
         var statuses = discoveries.Select(row => row.Status).ToList();
         var events = new List<TokenEvent>();
         bool scanSucceeded = false;
@@ -83,7 +84,8 @@ internal sealed class TokenScannerManager : IDisposable
                 Log.Write(
                     $"Token 扫描完成({reason}/{(fullScan ? "full" : "48h")})：" +
                     $"Codex {output.Diagnostics.CodexFiles} 文件，ZCode {output.Diagnostics.ZCodeDatabases} 库，" +
-                    $"DSH {output.Diagnostics.DshFiles} 文件，事件 {events.Count} 条");
+                    $"DSH {output.Diagnostics.DshFiles} 文件，WorkBuddy {output.Diagnostics.WorkBuddyFiles} 文件，" +
+                    $"事件 {events.Count} 条");
             }
             catch (Exception ex)
             {
@@ -160,7 +162,7 @@ internal sealed class TokenScannerManager : IDisposable
         {
             foreach (var watcher in _watchers) watcher.Dispose();
             _watchers = new List<FileSystemWatcher>();
-            foreach (string root in discoveries.Select(row => row.DataRoot).OfType<string>().Where(Directory.Exists).Distinct())
+            foreach (string root in discoveries.Select(WatchRoot).OfType<string>().Where(Directory.Exists).Distinct())
             {
                 try
                 {
@@ -182,6 +184,15 @@ internal sealed class TokenScannerManager : IDisposable
                 catch (Exception ex) { Log.Write("Token 文件监听器创建失败: " + ex.Message); }
             }
         }
+    }
+
+    private static string? WatchRoot(TokenDiscoveryResult discovery)
+    {
+        if (discovery.DataRoot == null) return null;
+        // WorkBuddy 的应用目录里还有频繁变化的配置、认证与 SQLite WAL；只监听逐请求日志目录。
+        return discovery.Source == "workbuddy"
+            ? Path.Combine(discovery.DataRoot, "projects")
+            : discovery.DataRoot;
     }
 
     private void DebounceScan()

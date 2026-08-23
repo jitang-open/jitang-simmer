@@ -21,6 +21,7 @@ internal class Config
     public string CodexHome { get; set; } = "";
     public string ZCodeHome { get; set; } = "";
     public string DshHome { get; set; } = "";
+    public string WorkBuddyHome { get; set; } = "";
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 

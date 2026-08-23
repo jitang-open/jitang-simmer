@@ -4,8 +4,8 @@ namespace SimmerCollector;
 
 internal static class TokenProtocol
 {
-    public const string ParserVersion = "tokscale-b069c85";
-    public static readonly string[] Sources = ["codex", "zcode", "dsh"];
+    public const string ParserVersion = "tokscale-b069c85-wb1";
+    public static readonly string[] Sources = ["codex", "zcode", "dsh", "workbuddy"];
 }
 
 internal sealed class TokenEvent
@@ -62,6 +62,7 @@ internal sealed class TokenScanDiagnostics
     [JsonPropertyName("codexFiles")] public int CodexFiles { get; set; }
     [JsonPropertyName("zcodeDatabases")] public int ZCodeDatabases { get; set; }
     [JsonPropertyName("dshFiles")] public int DshFiles { get; set; }
+    [JsonPropertyName("workBuddyFiles")] public int WorkBuddyFiles { get; set; }
     [JsonPropertyName("skippedInvalidEvents")] public int SkippedInvalidEvents { get; set; }
 }
 

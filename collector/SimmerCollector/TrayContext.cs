@@ -220,6 +220,7 @@ internal class SettingsForm : Form
     private readonly TextBox _txtCodex = new() { Top = 180, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
     private readonly TextBox _txtZCode = new() { Top = 210, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
     private readonly TextBox _txtDsh = new() { Top = 240, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
+    private readonly TextBox _txtWorkBuddy = new() { Top = 270, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
 
     public SettingsForm(Config cfg)
     {
@@ -228,13 +229,14 @@ internal class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(420, 325);
+        ClientSize = new Size(420, 355);
 
         void Label(string text, int top) =>
             Controls.Add(new Label { Text = text, AutoSize = true, Top = top + 3, Left = 15 });
 
         Label("服务器地址", 30); Label("上报 Token", 60); Label("设备名称", 90); Label("空闲阈值(分钟)", 120);
         Label("Codex 数据目录", 180); Label("ZCode 数据目录", 210); Label("DSH 数据目录", 240);
+        Label("WorkBuddy 数据目录", 270);
 
         _txtUrl.Text = cfg.ServerUrl;
         _txtToken.Text = cfg.Token;
@@ -244,13 +246,15 @@ internal class SettingsForm : Form
         _txtCodex.Text = cfg.CodexHome;
         _txtZCode.Text = cfg.ZCodeHome;
         _txtDsh.Text = cfg.DshHome;
-        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh]);
+        _txtWorkBuddy.Text = cfg.WorkBuddyHome;
+        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh, _txtWorkBuddy]);
         AddBrowseButton(_txtCodex, 180);
         AddBrowseButton(_txtZCode, 210);
         AddBrowseButton(_txtDsh, 240);
+        AddBrowseButton(_txtWorkBuddy, 270);
 
-        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 280, Left = 230, Width = 85 };
-        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 280, Left = 325, Width = 80 };
+        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 310, Left = 230, Width = 85 };
+        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 310, Left = 325, Width = 80 };
         ok.Click += (s, e) =>
         {
             cfg.ServerUrl = _txtUrl.Text.Trim();
@@ -261,6 +265,7 @@ internal class SettingsForm : Form
             cfg.CodexHome = _txtCodex.Text.Trim();
             cfg.ZCodeHome = _txtZCode.Text.Trim();
             cfg.DshHome = _txtDsh.Text.Trim();
+            cfg.WorkBuddyHome = _txtWorkBuddy.Text.Trim();
         };
         Controls.Add(ok);
         Controls.Add(cancel);

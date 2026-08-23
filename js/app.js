@@ -87,7 +87,7 @@ const state = {
 };
 
 const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', monthly: '本月', total: '累计' };
-const TOKEN_SOURCE_NAME = { codex: 'Codex', zcode: 'ZCode', dsh: 'DeepSeek Harness' };
+const TOKEN_SOURCE_NAME = { codex: 'Codex', zcode: 'ZCode', dsh: 'DeepSeek Harness', workbuddy: 'WorkBuddy' };
 const TOKEN_STATUS = {
   ready: ['可用', 'ok'],
   installed_no_data: ['已安装，暂无数据', 'muted'],

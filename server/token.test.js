@@ -81,11 +81,26 @@ const events = [
     totalTokens: 45,
     parserVersion: 'test-1',
   },
+  {
+    sourceEventId: eventId('workbuddy-request-1'),
+    source: 'workbuddy',
+    provider: 'moonshot',
+    model: 'kimi-k3-1',
+    occurredAt: now.toISOString(),
+    inputTokens: 60,
+    outputTokens: 15,
+    cacheReadTokens: 25,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 100,
+    parserVersion: 'test-1',
+  },
 ];
 const statuses = [
   { source: 'codex', state: 'ready', detailCode: 'sessions_found', checkedAt: now.toISOString(), parserVersion: 'test-1' },
   { source: 'zcode', state: 'ready', detailCode: 'database_found', checkedAt: now.toISOString(), parserVersion: 'test-1' },
   { source: 'dsh', state: 'not_found', detailCode: 'home_missing', checkedAt: now.toISOString(), parserVersion: 'test-1' },
+  { source: 'workbuddy', state: 'ready', detailCode: 'data_and_app', checkedAt: now.toISOString(), parserVersion: 'test-1' },
 ];
 const payload = { deviceId: 'test-pc', deviceName: 'Test PC', events, statuses };
 
@@ -100,48 +115,48 @@ test('Token 上报需要鉴权，并拒绝总数不一致的事件', async () =>
 
 test('Token 请求级事件按稳定 ID 幂等写入', async () => {
   const first = await request('/api/ai-token-events', { method: 'POST', body: payload, authorized: true });
-  assert.deepEqual(first.body, { ok: true, received: 2, inserted: 2, duplicates: 0, statuses: 3 });
+  assert.deepEqual(first.body, { ok: true, received: 3, inserted: 3, duplicates: 0, statuses: 4 });
   const second = await request('/api/ai-token-events', { method: 'POST', body: payload, authorized: true });
-  assert.deepEqual(second.body, { ok: true, received: 2, inserted: 0, duplicates: 2, statuses: 3 });
-  assert.equal(db.prepare('SELECT COUNT(*) FROM ai_token_events').pluck().get(), 2);
+  assert.deepEqual(second.body, { ok: true, received: 3, inserted: 0, duplicates: 3, statuses: 4 });
+  assert.equal(db.prepare('SELECT COUNT(*) FROM ai_token_events').pluck().get(), 3);
 });
 
 test('Token 汇总、筛选、分组、热力图和来源状态返回一致数据', async () => {
   const total = await request('/api/ai-tokens/summary?device=test-pc&range=total');
   assert.deepEqual(total.body, {
-    inputTokens: 140,
-    outputTokens: 55,
-    cacheReadTokens: 20,
+    inputTokens: 200,
+    outputTokens: 70,
+    cacheReadTokens: 45,
     cacheWriteTokens: 0,
     reasoningTokens: 10,
-    totalTokens: 225,
-    eventCount: 2,
+    totalTokens: 325,
+    eventCount: 3,
   });
 
   const codex = await request('/api/ai-tokens/summary?device=test-pc&range=total&sources=codex');
   assert.equal(codex.body.totalTokens, 180);
   const breakdown = await request('/api/ai-tokens/breakdown?device=test-pc&range=total&dimension=source');
-  assert.deepEqual(breakdown.body.map(row => [row.id, row.tokens]), [['codex', 180], ['zcode', 45]]);
+  assert.deepEqual(breakdown.body.map(row => [row.id, row.tokens]), [['codex', 180], ['workbuddy', 100], ['zcode', 45]]);
 
   const year = await request(`/api/ai-tokens/year?device=test-pc&year=${now.getFullYear()}`);
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  assert.equal(year.body.find(day => day.date === today).tokens, 225);
+  assert.equal(year.body.find(day => day.date === today).tokens, 325);
 
   const dimensions = await request('/api/ai-tokens/dimensions?device=test-pc');
-  assert.deepEqual(dimensions.body.sources, ['codex', 'zcode']);
-  assert.deepEqual(dimensions.body.models, ['glm-5.3', 'gpt-5.6-sol']);
+  assert.deepEqual(dimensions.body.sources, ['codex', 'workbuddy', 'zcode']);
+  assert.deepEqual(dimensions.body.models, ['glm-5.3', 'gpt-5.6-sol', 'kimi-k3-1']);
 
   const sourceRows = await request('/api/ai-tokens/sources?device=test-pc');
-  assert.equal(sourceRows.body.length, 3);
+  assert.equal(sourceRows.body.length, 4);
   assert.equal(sourceRows.body.find(row => row.source === 'dsh').state, 'not_found');
 
   const selectedDay = await request(`/api/ai-tokens/summary?device=test-pc&range=daily&date=${today}`);
-  assert.equal(selectedDay.body.totalTokens, 225);
+  assert.equal(selectedDay.body.totalTokens, 325);
   const modelTrend = await request(`/api/ai-tokens/trend?device=test-pc&range=daily&date=${today}&groupBy=model`);
-  assert.deepEqual(modelTrend.body.series.map(series => series.id), ['glm-5.3', 'gpt-5.6-sol']);
+  assert.deepEqual(modelTrend.body.series.map(series => series.id), ['glm-5.3', 'gpt-5.6-sol', 'kimi-k3-1']);
   assert.equal(modelTrend.body.series.reduce(
     (sum, series) => sum + series.values.reduce((inner, value) => inner + value, 0), 0
-  ), 225);
+  ), 325);
 });
 
 test('本地来源消失后累计历史仍保留，并显示历史已保存', async () => {
@@ -153,26 +168,30 @@ test('本地来源消失后累计历史仍保留，并显示历史已保存', as
       { ...statuses[0], state: 'not_found', detailCode: 'no_data_or_app' },
       { ...statuses[1], state: 'installed_no_data', detailCode: 'app_only' },
       statuses[2],
+      { ...statuses[3], state: 'not_found', detailCode: 'no_data_or_app' },
     ],
   };
   const update = await request('/api/ai-token-events', {
     method: 'POST', body: missingPayload, authorized: true,
   });
-  assert.deepEqual(update.body, { ok: true, received: 0, inserted: 0, duplicates: 0, statuses: 3 });
+  assert.deepEqual(update.body, { ok: true, received: 0, inserted: 0, duplicates: 0, statuses: 4 });
 
   const total = await request('/api/ai-tokens/summary?device=test-pc&range=total');
-  assert.equal(total.body.totalTokens, 225);
-  assert.equal(total.body.eventCount, 2);
+  assert.equal(total.body.totalTokens, 325);
+  assert.equal(total.body.eventCount, 3);
 
   const sourceRows = await request('/api/ai-tokens/sources?device=test-pc');
   const codex = sourceRows.body.find(row => row.source === 'codex');
   const zcode = sourceRows.body.find(row => row.source === 'zcode');
   const dsh = sourceRows.body.find(row => row.source === 'dsh');
+  const workbuddy = sourceRows.body.find(row => row.source === 'workbuddy');
   assert.equal(codex.state, 'history_only');
   assert.equal(codex.detailCode, 'server_history_only');
   assert.equal(zcode.state, 'history_only');
   assert.equal(zcode.detailCode, 'server_history_only');
   assert.equal(dsh.state, 'not_found');
+  assert.equal(workbuddy.state, 'history_only');
+  assert.equal(workbuddy.detailCode, 'server_history_only');
 });
 
 test('设备可改名、暂停并恢复软件与 Token 统计', async () => {
@@ -199,7 +218,7 @@ test('设备可改名、暂停并恢复软件与 Token 统计', async () => {
     },
   });
   assert.equal(pausedToken.body.paused, true);
-  assert.equal(db.prepare('SELECT COUNT(*) FROM ai_token_events').pluck().get(), 2);
+  assert.equal(db.prepare('SELECT COUNT(*) FROM ai_token_events').pluck().get(), 3);
 
   const resumed = await request('/api/devices/test-pc', { method: 'PATCH', body: { paused: false } });
   assert.equal(resumed.body.paused, false);
