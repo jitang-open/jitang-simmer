@@ -10,12 +10,15 @@ internal class TrayContext : ApplicationContext
 {
     private readonly Config _cfg;
     private readonly LocalStore _store;
+    private readonly HardwareLocalStore _hardwareStore;
+    private readonly HardwareMonitor _hardwareMonitor;
     private readonly TokenScannerManager _tokenScanner;
     private readonly MinuteAggregator _aggregator = new();
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _menu = new();
     private readonly Control _uiSync = new Control();   // 专用隐藏控件：为后台线程提供 UI 调度句柄
     private readonly System.Threading.Timer _sampleTimer;
+    private readonly System.Threading.Timer _hardwareTimer;
     private readonly System.Threading.Timer _uploadTimer;
     private readonly SemaphoreSlim _uploadLock = new(1, 1);
 
@@ -30,6 +33,8 @@ internal class TrayContext : ApplicationContext
         try { AutoStartManager.Apply(_cfg.StartWithWindows); }
         catch (Exception ex) { Log.Write("开机自启状态同步失败: " + ex.Message); }
         _store = new LocalStore();
+        _hardwareStore = new HardwareLocalStore();
+        _hardwareMonitor = new HardwareMonitor();
         _tokenScanner = new TokenScannerManager(_cfg);
         _ = _uiSync.Handle;                            // 立即创建句柄，使 BeginInvoke 可用
 
@@ -63,6 +68,9 @@ internal class TrayContext : ApplicationContext
 
         // 采样定时器：每 2 秒（回调异常不得拖垮进程）
         _sampleTimer = new System.Threading.Timer(_ => Safe(Sample), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+        // 硬件指标每分钟采样一次；独立于前台窗口采样，单项传感器缺失不会影响主链路。
+        _hardwareTimer = new System.Threading.Timer(_ => Safe(SampleHardware), null,
+            TimeSpan.Zero, TimeSpan.FromMinutes(1));
         // 上报定时器：每分钟检查，间隔到达或队列过长时触发
         _uploadTimer = new System.Threading.Timer(_ => _ = UploadDueSafeAsync(), null,
             TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
@@ -89,6 +97,13 @@ internal class TrayContext : ApplicationContext
         _aggregator.AddSample(idle, exe);
     }
 
+    private void SampleHardware()
+    {
+        if (_paused || !_cfg.EnableHardwareMonitoring) return;
+        var sample = _hardwareMonitor.Capture();
+        if (sample is { HasValue: true }) _hardwareStore.Upsert(sample);
+    }
+
     /* ---------------- 上报 ---------------- */
 
     private async Task UploadDue()
@@ -108,25 +123,33 @@ internal class TrayContext : ApplicationContext
         try
         {
             var batch = _store.Peek(2000);
-            if (batch.Count == 0) { UpdateTooltip("队列为空"); return; }
+            var hardwareBatch = _hardwareStore.Peek(2000);
+            if (batch.Count == 0 && hardwareBatch.Count == 0)
+            {
+                UpdateTooltip("队列为空");
+                return;
+            }
 
             _lastUpload = DateTime.Now;
-            bool ok = await Uploader.FlushAsync(_cfg, batch);
-            if (ok)
+            bool usageOk = batch.Count == 0 || await Uploader.FlushAsync(_cfg, batch);
+            bool hardwareOk = hardwareBatch.Count == 0 || await Uploader.FlushHardwareAsync(_cfg, hardwareBatch);
+            if (usageOk && batch.Count > 0) _store.Dequeue(batch.Count);
+            if (hardwareOk && hardwareBatch.Count > 0) _hardwareStore.Dequeue(hardwareBatch);
+
+            if (usageOk && hardwareOk)
             {
-                _store.Dequeue(batch.Count);
                 _lastSuccess = DateTime.Now;
-                UpdateTooltip($"已上报 {batch.Count} 条");
+                UpdateTooltip($"已上报 {batch.Count + hardwareBatch.Count} 条");
             }
             else
             {
-                UpdateTooltip($"上报失败（队列保留 {_store.Count} 条）");
+                UpdateTooltip($"上报失败（队列保留 {_store.Count + _hardwareStore.Count} 条）");
             }
         }
         catch (Exception ex)
         {
             Log.Write("上报处理异常: " + ex.Message);
-            UpdateTooltip($"上报异常（队列保留 {_store.Count} 条）");
+            UpdateTooltip($"上报异常（队列保留 {_store.Count + _hardwareStore.Count} 条）");
         }
         finally
         {
@@ -188,7 +211,9 @@ internal class TrayContext : ApplicationContext
         var rec = _aggregator.FlushCurrent();
         if (rec != null) _store.Enqueue(rec);
         _sampleTimer.Dispose();
+        _hardwareTimer.Dispose();
         _uploadTimer.Dispose();
+        _hardwareMonitor.Dispose();
         _tokenScanner.Dispose();
         _tray.Visible = false;
         Application.Exit();
@@ -223,7 +248,8 @@ internal class SettingsForm : Form
     private readonly TextBox _txtZCode = new() { Top = 210, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
     private readonly TextBox _txtDsh = new() { Top = 240, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
     private readonly TextBox _txtWorkBuddy = new() { Top = 270, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
-    private readonly CheckBox _chkAutoStart = new() { Top = 303, Left = 110, Width = 280, Text = "登录 Windows 后自动启动采集器" };
+    private readonly CheckBox _chkHardware = new() { Top = 303, Left = 110, Width = 280, Text = "启用硬件监控（部分传感器需管理员）" };
+    private readonly CheckBox _chkAutoStart = new() { Top = 330, Left = 110, Width = 280, Text = "登录 Windows 后自动启动采集器" };
 
     public SettingsForm(Config cfg)
     {
@@ -232,7 +258,7 @@ internal class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(420, 390);
+        ClientSize = new Size(420, 425);
 
         void Label(string text, int top) =>
             Controls.Add(new Label { Text = text, AutoSize = true, Top = top + 3, Left = 15 });
@@ -250,15 +276,16 @@ internal class SettingsForm : Form
         _txtZCode.Text = cfg.ZCodeHome;
         _txtDsh.Text = cfg.DshHome;
         _txtWorkBuddy.Text = cfg.WorkBuddyHome;
+        _chkHardware.Checked = cfg.EnableHardwareMonitoring;
         _chkAutoStart.Checked = cfg.StartWithWindows && AutoStartManager.IsRegistered();
-        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh, _txtWorkBuddy, _chkAutoStart]);
+        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh, _txtWorkBuddy, _chkHardware, _chkAutoStart]);
         AddBrowseButton(_txtCodex, 180);
         AddBrowseButton(_txtZCode, 210);
         AddBrowseButton(_txtDsh, 240);
         AddBrowseButton(_txtWorkBuddy, 270);
 
-        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 345, Left = 230, Width = 85 };
-        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 345, Left = 325, Width = 80 };
+        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 380, Left = 230, Width = 85 };
+        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 380, Left = 325, Width = 80 };
         ok.Click += (s, e) =>
         {
             try { AutoStartManager.Apply(_chkAutoStart.Checked); }
@@ -279,6 +306,7 @@ internal class SettingsForm : Form
             cfg.ZCodeHome = _txtZCode.Text.Trim();
             cfg.DshHome = _txtDsh.Text.Trim();
             cfg.WorkBuddyHome = _txtWorkBuddy.Text.Trim();
+            cfg.EnableHardwareMonitoring = _chkHardware.Checked;
             cfg.StartWithWindows = _chkAutoStart.Checked;
         };
         Controls.Add(ok);

@@ -4,6 +4,7 @@
  *  - devices：设备注册表
  *  - ai_token_events：请求级 AI Token 数字事件（不保存对话内容或本地路径）
  *  - ai_source_status：各设备的本地 AI 来源发现状态
+ *  - hardware_samples：逐分钟硬件快照（传感器不可用的字段为 NULL）
  *  - ts 为采集端本地时间字符串 'YYYY-MM-DDTHH:MM'，便于字符串比较聚合
  * ============================================================ */
 const Database = require('better-sqlite3');
@@ -66,6 +67,21 @@ CREATE TABLE IF NOT EXISTS ai_source_status (
   parser_version  TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (device_id, source)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS hardware_samples (
+  device_id   TEXT NOT NULL,
+  ts          TEXT NOT NULL,
+  cpu_load    REAL,
+  gpu_load    REAL,
+  memory_load REAL,
+  vram_load   REAL,
+  cpu_temp    REAL,
+  gpu_temp    REAL,
+  power_watts REAL,
+  disk_load   REAL,
+  PRIMARY KEY (device_id, ts)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_hardware_samples_ts
+  ON hardware_samples (ts, device_id);
 `);
 
 // v0.7.2：SQLite 无法直接扩展 CHECK 约束；用事务重建两张 Token 表并原样迁移历史。
@@ -119,5 +135,11 @@ if (!tokenTableSql.includes("'workbuddy'")) {
 const deviceColumns = new Set(db.prepare('PRAGMA table_info(devices)').all().map(column => column.name));
 if (!deviceColumns.has('custom_name')) db.exec('ALTER TABLE devices ADD COLUMN custom_name TEXT');
 if (!deviceColumns.has('paused')) db.exec('ALTER TABLE devices ADD COLUMN paused INTEGER NOT NULL DEFAULT 0');
+
+// 部分驱动以 0°C 表示“传感器无读数”；历史零值统一迁移为空，避免伪装成真实温度。
+db.exec(`
+  UPDATE hardware_samples SET cpu_temp=NULL WHERE cpu_temp<=0;
+  UPDATE hardware_samples SET gpu_temp=NULL WHERE gpu_temp<=0;
+`);
 
 module.exports = db;

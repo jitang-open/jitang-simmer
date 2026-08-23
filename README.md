@@ -14,7 +14,7 @@ GitHub Contributions 式点阵图 × Spotify 深色绿色系 · 本机真实数�
 
 - **🖥️ 软件使用时长统计**：GitHub 风格年度点阵图、24 小时 / 近 7 天 / 近一年趋势折线图、分软件横向柱状图排行、时长占比环形图
 - **🤖 AI Token Statistics**：请求级统计 Codex、ZCode、DeepSeek Harness 和 WorkBuddy；展示输入、输出、缓存读取/写入、推理、总 Token、年度点阵、来源/模型排行；来源/provider 使用统一下拉、模型支持多选，支持日/周/月/自定义/累计，年度点阵最高按 1 亿 Tokens 顶格；已经上传的历史不随本地日志、工具或扫描路径消失
-- **🌡️ 硬件监控界面**：CPU / GPU 占用、内存 / 显存占用、CPU / GPU 温度、整机功耗、硬盘占用——8 张折线图卡片已完成；真实硬件采集属于 M2，当前实时模式显示占位状态
+- **🌡️ 硬件监控**：基于 LibreHardwareMonitor 0.9.6 每分钟采集 CPU / GPU 占用、内存 / 显存占用、CPU / GPU 温度、可用功耗和硬盘占用；逐项缺失显示为不可用，不阻塞软件时长或 Token 统计
 - **📋 白名单**：只统计白名单内软件，开关即时生效、全站图表实时重算；添加软件时可搜索、滚动选择已观测进程或手动输入，软件类型使用统一下拉，清空必须二次确认；配置持久化到后端 SQLite，跨浏览器及 `localhost` / `127.0.0.1` 共享
 - **💻 多设备**：每台电脑独立统计上传，主页面默认汇总，可切换查看单台设备
 - **🗓️ 日期下钻**：点击软件或 Token 年度点阵格即可查看当天；两个卡片都使用与设备选择器一致的暗色下拉日历，可独立选择日、自然周、自然月或任意起止日期，Token 另有累计全部历史
@@ -28,7 +28,7 @@ GitHub Contributions 式点阵图 × Spotify 深色绿色系 · 本机真实数�
 
 ## 🚀 如何运行
 
-**M1.5 系统由四个部分组成**：
+**系统由前端、后端、C# 采集器和 Rust Token sidecar 组成**：
 
 ```
 本地 AI 日志 ──▶ simmer-token-scan.exe（Rust / tokscale-core）
@@ -42,7 +42,7 @@ collector/（C# 采集端） ──┴──上报──▶ server/（Node 后�
 
 当前开发机也可直接双击 [`启动 Jitang Simmer.cmd`](./启动%20Jitang%20Simmer.cmd)，它会使用终端 PATH 中的 Node.js 24 启动后端、采集端并打开面板。若需从源码重新生成两个采集端程序，在 PowerShell 执行 `collector/build.ps1`。
 
-当前开发机的默认 `node` 是 24，与现有 `better-sqlite3` 二进制不兼容；可在 `server/` 目录直接运行：
+如需显式使用当前开发机的 Node.js 24，可在 `server/` 目录运行：
 
 ```powershell
 & "C:\Users\jitang\.local\nodejs\node.exe" index.js
@@ -53,7 +53,7 @@ collector/（C# 采集端） ──┴──上报──▶ server/（Node 后�
 ## 🛠️ 技术栈
 
 - **前端**：HTML + CSS + 原生 JavaScript，零框架、零图表库、零构建；图表手写 SVG（Catmull-Rom 平滑折线、按各图 P95 独立分档并设置业务硬上限的点阵图等）
-- **采集端**：C# / .NET 8 WinForms 托盘程序，P/Invoke（`GetForegroundWindow` 前台监听、`GetLastInputInfo` 空闲检测），本地队列断网不丢、失败自动重试
+- **采集端**：C# / .NET 8 WinForms 托盘程序，P/Invoke（`GetForegroundWindow` 前台监听、`GetLastInputInfo` 空闲检测）+ [LibreHardwareMonitorLib 0.9.6](https://www.nuget.org/packages/LibreHardwareMonitorLib/)（MPL-2.0），软件与硬件使用独立本地队列，断网不丢、失败自动重试
 - **Token 解析器**：Rust 独立 sidecar，固定 `tokscale-core` 提交 `b069c85d530c35ba1a3517e80aaa8423428dccd8`；解析 Codex JSONL、ZCode SQLite、DSH JSONL/Zstandard 与 WorkBuddy 项目 JSONL，只向采集器输出五类互斥数字桶
 - **后端**：Node.js Express + better-sqlite3；上报接口 Bearer token 鉴权 + 幂等；查询接口与前端 mock 层同构，可无缝切换
 
@@ -71,7 +71,7 @@ collector/（C# 采集端） ──┴──上报──▶ server/（Node 后�
 │   ├── SimmerCollector/ # C# 托盘采集、来源发现、离线队列与上报
 │   ├── SimmerTokenScan/ # Rust 请求级 Token 解析 sidecar
 │   └── build.ps1       # 生成两个本机运行 EXE
-├── server/             # Node.js 中心后端（软件时长 + AI Token SQLite/API）
+├── server/             # Node.js 中心后端（软件时长 + AI Token + 硬件 SQLite/API）
 └── docs/               # 交接文档 / 需求文档
 ```
 
@@ -79,7 +79,7 @@ collector/（C# 采集端） ──┴──上报──▶ server/（Node 后�
 
 - [x] M1 最小闭环：Windows 采集端（前台窗口 + 空闲检测 + 托盘 + 断网缓存）+ Node 后端（上报 + SQLite + 聚合接口）+ 前端实时数据源 ✅ 2026-08-21
 - [x] M1.5 Token Statistics：Codex / ZCode / DSH / WorkBuddy 来源发现、请求级解析、幂等存储、筛选与 Token 面板 ✅ v0.8.1（DSH V4 Flash 与 WorkBuddy 均已真实验收）
-- [ ] M2 硬件指标采集（LibreHardwareMonitor：CPU/GPU 温度、功耗、占用、显存、硬盘）
+- [x] M2 硬件指标采集：LibreHardwareMonitor 分钟快照、离线队列、SQLite 幂等存储、聚合 API 与真实折线卡片 ✅ v0.9.0
 - [x] 白名单 / 软件名称 / 颜色 / 分类后端持久化，跨浏览器与跨 origin 共享 ✅ v0.6.6
 - [x] 年度点阵图按各图 P95 独立比例分档 ✅ v0.6.7
 - [x] 全站下拉样式统一、Token 时间按钮、进程搜索滚动、清空确认与趋势默认收起 ✅ v0.7.1

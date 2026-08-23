@@ -2,8 +2,7 @@
  * Simmer · 实时数据源（对接 Simmer Server 后端）
  *  - 接口与 data.js（MockDB）同构：调用返回 Promise，
  *    app.js 统一用 await 接收（await 同步值同样成立，两库通用）
- *  - M1.5 已增加 AI Token 统计；硬件指标（metricDefs）仍为空，
- *    metricCurrent 返回 null，由界面提示 M2 支持
+ *  - M2 接入一分钟粒度硬件指标；缺失的传感器保持 null，不伪造为 0
  *  - APP_META 为内置进程映射表（CAP-02 第一版）
  * ============================================================ */
 const LiveDB = (() => {
@@ -34,6 +33,16 @@ const LiveDB = (() => {
   };
   const meta = exe => APP_META[exe] ||
     { name: exe.replace(/\.exe$/i, ''), icon: '📦', color: '#8b949e', category: '其他' };
+  const METRIC_DEFS = [
+    { id: 'cpu',     name: 'CPU 占用', unit: '%',  color: '#58a6ff' },
+    { id: 'gpu',     name: 'GPU 占用', unit: '%',  color: '#bc8cff' },
+    { id: 'mem',     name: '内存占用', unit: '%',  color: '#1db954' },
+    { id: 'vram',    name: '显存占用', unit: '%',  color: '#39d0d8' },
+    { id: 'cpuTemp', name: 'CPU 温度', unit: '°C', color: '#f778ba' },
+    { id: 'gpuTemp', name: 'GPU 温度', unit: '°C', color: '#ffa657' },
+    { id: 'power',   name: '可用功耗', unit: 'W',  color: '#e3b341' },
+    { id: 'disk',    name: '硬盘占用', unit: '%',  color: '#8b949e' },
+  ];
 
   async function j(path, options) {
     const r = await fetch(BASE + path, options);
@@ -82,7 +91,7 @@ const LiveDB = (() => {
         reportedName: d.reportedName || d.name,
         paused: !!d.paused,
       })),
-      metricDefs: [],                                    // 硬件指标 M2 支持
+      metricDefs: METRIC_DEFS,
       serverSettings: settingsRaw.settings,
       saveSettings: settings => j('/api/settings', {
         method: 'PUT',
@@ -109,8 +118,12 @@ const LiveDB = (() => {
       allApps: () =>
         j('/api/app-totals?range=total')
           .then(rows => rows.map(r => ({ id: r.id, minutes: r.minutes }))),
-      metricSeries: async () => ({ labels: [], values: [] }),
-      metricCurrent: async () => null,
+      metricSeries: (device, metric, range2) =>
+        j(`/api/hardware/series?device=${encodeURIComponent(device || 'all')}` +
+          `&metric=${encodeURIComponent(metric)}&range=${encodeURIComponent(range2 || 'daily')}`),
+      metricCurrent: (device, metric) =>
+        j(`/api/hardware/current?device=${encodeURIComponent(device || 'all')}` +
+          `&metric=${encodeURIComponent(metric)}`).then(row => row.value),
       rangeTotalMinutes: async (device, appIds, range2) => {
         const rows = await j(`/api/app-totals?${q(device, appIds)}&range=${range2}`);
         return rows.reduce((s, r) => s + r.minutes, 0);

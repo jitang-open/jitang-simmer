@@ -708,15 +708,19 @@ async function renderOverview(ctx, token) {
   if (!isRenderCurrent(token)) return;
   const activeApps = totalRows.filter(r => r.minutes > 0).length;
   const hwReady = cpu !== null;
-  const temp = tempCpu !== null && tempGpu !== null ? ((tempCpu + tempGpu) / 2).toFixed(1) : null;
+  const temperatures = [tempCpu, tempGpu].filter(value => value !== null);
+  const temp = temperatures.length
+    ? (temperatures.reduce((sum, value) => sum + value, 0) / temperatures.length).toFixed(1)
+    : null;
+  const tempSource = temperatures.length === 2 ? 'CPU / GPU 平均' : (tempCpu !== null ? 'CPU 传感器' : 'GPU 传感器');
 
   const th = Math.floor(totalMin / 60), tm = Math.round(totalMin % 60);
   const cards = [
     { label: RANGE_LABEL[ctx.range] + '总时长', value: `${th}<small> 小时 </small>${tm}<small> 分</small>`, extra: `白名单内 ${ctx.appIds.length} 款软件`, icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm1 10.6l4.2 2.5-.8 1.3L11 13.5V7h2v5.6z' },
     { label: '活跃软件', value: activeApps + ' <small>款</small>', extra: RANGE_LABEL[ctx.range] + '内有使用记录', icon: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
-    { label: 'CPU 占用', value: hwReady ? cpu + ' <small>%</small>' : '—', extra: hwReady ? '当前时刻 · 实时采集' : '待 M2 硬件采集支持', icon: 'M9 9h6v6H9zM12 1v4M12 19v4M1 12h4M19 12h4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M19.8 4.2L17 7M7 17l-2.8 2.8' },
-    { label: '核心温度', value: temp !== null ? temp + ' <small>°C</small>' : '—', extra: temp !== null ? 'CPU / GPU 平均' : '待 M2 硬件采集支持', icon: 'M14 14.8V5a2 2 0 10-4 0v9.8a4.5 4.5 0 104 0z' },
-    { label: '整机功耗', value: power !== null ? power + ' <small>W</small>' : '—', extra: power !== null ? (ctx.device === 'all' ? '全部设备合计' : '当前设备') : '待 M2 硬件采集支持', icon: 'M13 2L4 14h6v8l9-12h-6V2z' },
+    { label: 'CPU 占用', value: hwReady ? cpu + ' <small>%</small>' : '—', extra: hwReady ? '当前时刻 · 实时采集' : '当前传感器不可用', icon: 'M9 9h6v6H9zM12 1v4M12 19v4M1 12h4M19 12h4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M19.8 4.2L17 7M7 17l-2.8 2.8' },
+    { label: '核心温度', value: temp !== null ? temp + ' <small>°C</small>' : '—', extra: temp !== null ? tempSource : '当前传感器不可用', icon: 'M14 14.8V5a2 2 0 10-4 0v9.8a4.5 4.5 0 104 0z' },
+    { label: '可用功耗', value: power !== null ? power + ' <small>W</small>' : '—', extra: power !== null ? (ctx.device === 'all' ? '全部设备合计' : 'CPU / GPU 可用传感器') : '当前传感器不可用', icon: 'M13 2L4 14h6v8l9-12h-6V2z' },
   ];
 
   $('#sec-overview').innerHTML = cards.map(c => `
@@ -1048,8 +1052,8 @@ async function renderTokens(ctx, token) {
 /* ---------------- 硬件监控 ---------------- */
 async function renderHardware(ctx, token) {
   const grid = $('#hwGrid');
-  if (!DB.metricDefs.length) {                      // M2（CAP-06）补齐硬件采集
-    if (isRenderCurrent(token)) grid.innerHTML = '<div class="hw-empty">硬件指标采集将在 M2（CAP-06，基于 LibreHardwareMonitor）接入</div>';
+  if (!DB.metricDefs.length) {
+    if (isRenderCurrent(token)) grid.innerHTML = '<div class="hw-empty">当前数据源未提供硬件指标</div>';
     return;
   }
   const metrics = await Promise.all(DB.metricDefs.map(async m => ({
@@ -1060,15 +1064,20 @@ async function renderHardware(ctx, token) {
   if (!isRenderCurrent(token)) return;
   grid.innerHTML = '';
   metrics.forEach(({ m, cur, series }) => {
+    const hasSeries = series.values.some(Number.isFinite);
     const card = document.createElement('div');
     card.className = 'hw-card';
     card.innerHTML = `
       <div class="hw-head">
         <span class="hw-name"><i style="background:${safeColor(m.color)}"></i>${escapeHTML(m.name)}</span>
-        <span class="hw-val">${escapeHTML(cur)}<small> ${escapeHTML(m.unit)}</small></span>
+        <span class="hw-val">${cur === null ? '—' : escapeHTML(cur)}${cur === null ? '' : `<small> ${escapeHTML(m.unit)}</small>`}</span>
       </div>
       <div class="hw-chart"></div>`;
     grid.appendChild(card);
+    if (!hasSeries) {
+      card.querySelector('.hw-chart').innerHTML = '<div class="hw-sensor-empty">当前传感器暂无数据</div>';
+      return;
+    }
     Charts.line(card.querySelector('.hw-chart'), {
       labels: series.labels, values: series.values, color: m.color, unit: ' ' + m.unit, height: 120,
     });

@@ -28,6 +28,13 @@ internal class Uploader
         public List<TokenSourceStatus> statuses { get; set; } = new();
     }
 
+    private class HardwarePayload
+    {
+        public string deviceId { get; set; } = "";
+        public string deviceName { get; set; } = "";
+        public List<HardwareSample> samples { get; set; } = new();
+    }
+
     /// <summary>上报一批记录；成功返回 true（调用方负责从本地队列移除）</summary>
     public static async Task<bool> FlushAsync(Config cfg, List<MinuteRecord> records)
     {
@@ -94,6 +101,40 @@ internal class Uploader
         catch (Exception ex)
         {
             Log.Write("Token 上报异常: " + ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>上报一分钟粒度硬件样本；字段缺失使用 null，不上传驱动或硬件标识。</summary>
+    public static async Task<bool> FlushHardwareAsync(Config cfg, List<HardwareSample> samples)
+    {
+        if (samples.Count == 0) return true;
+        try
+        {
+            var json = JsonSerializer.Serialize(new HardwarePayload
+            {
+                deviceId = cfg.DeviceId,
+                deviceName = cfg.DeviceName,
+                samples = samples,
+            });
+            var req = new HttpRequestMessage(HttpMethod.Post, cfg.ServerUrl.TrimEnd('/') + "/api/hardware-samples")
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            };
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", cfg.Token);
+            using var resp = await Http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                string body = await resp.Content.ReadAsStringAsync();
+                Log.Write($"硬件上报失败 HTTP {(int)resp.StatusCode}: {(body.Length > 200 ? body[..200] : body)}");
+                return false;
+            }
+            Log.Write($"硬件上报成功 {samples.Count} 条");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Write("硬件上报异常: " + ex.Message);
             return false;
         }
     }

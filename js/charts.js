@@ -173,11 +173,17 @@ const Charts = (() => {
     const color = safeColor(cfg.color);
     const W = 640, H = cfg.height || 180, P = { l: 38, r: 12, t: 14, b: 24 };
     const n = values.length;
-    const max = Math.max(...values, 0.001) * 1.15;
+    const finiteValues = values.map(Number).filter(Number.isFinite);
+    const max = Math.max(...finiteValues, 0.001) * 1.15;
     const iw = W - P.l - P.r, ih = H - P.t - P.b;
     const X = i => P.l + (n === 1 ? iw / 2 : i * iw / (n - 1));
     const Y = v => P.t + ih - (v / max) * ih;
-    const pts = values.map((v, i) => [X(i), Y(v)]);
+    const segments = [];
+    values.forEach((value, index) => {
+      if (!Number.isFinite(value)) return;
+      if (index === 0 || !Number.isFinite(values[index - 1])) segments.push([]);
+      segments.at(-1).push([X(index), Y(value)]);
+    });
 
     const gid = 'lg' + (++gradSeq);
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}` });
@@ -220,16 +226,18 @@ const Charts = (() => {
       }
       return d;
     }
-    const linePath = smooth(pts);
-
-    // 面积
-    const area = el('path', {
-      d: linePath + ` L${pts[n - 1][0]},${P.t + ih} L${pts[0][0]},${P.t + ih} Z`,
-      fill: `url(#${gid})`, class: 'lc-area',
-    });
-    svg.appendChild(area);
-    // 主线
-    svg.appendChild(el('path', { d: linePath, stroke: color, class: 'lc-line' }));
+    for (const points of segments) {
+      const linePath = smooth(points);
+      if (points.length === 1) {
+        svg.appendChild(el('circle', { cx: points[0][0], cy: points[0][1], r: 2.5, fill: color }));
+        continue;
+      }
+      svg.appendChild(el('path', {
+        d: linePath + ` L${points.at(-1)[0]},${P.t + ih} L${points[0][0]},${P.t + ih} Z`,
+        fill: `url(#${gid})`, class: 'lc-area',
+      }));
+      svg.appendChild(el('path', { d: linePath, stroke: color, class: 'lc-line' }));
+    }
 
     // 悬停辅助
     const guide = el('line', { y1: P.t, y2: P.t + ih, class: 'lc-guide' });
@@ -246,13 +254,17 @@ const Charts = (() => {
       i = Math.max(0, Math.min(n - 1, i));
       guide.setAttribute('x1', X(i)); guide.setAttribute('x2', X(i));
       guide.style.opacity = 1;
-      dot.setAttribute('cx', X(i)); dot.setAttribute('cy', Y(values[i]));
-      dot.style.opacity = 1;
+      if (Number.isFinite(values[i])) {
+        dot.setAttribute('cx', X(i)); dot.setAttribute('cy', Y(values[i]));
+        dot.style.opacity = 1;
+      } else {
+        dot.style.opacity = 0;
+      }
       if (i !== lastIdx) {   // 仅在数据点变化时重建内容，移动时只重定位
         lastIdx = i;
         const displayed = typeof cfg.valueFormatter === 'function'
           ? cfg.valueFormatter(rawValues[i])
-          : `${values[i]}${unit}`;
+          : (Number.isFinite(values[i]) ? `${values[i]}${unit}` : '暂无数据');
         showTip(`<span class="tip-date">${escapeHTML(labels[i])}</span><br><b>${escapeHTML(displayed)}</b>`, e.clientX, e.clientY);
       } else {
         moveTip(e.clientX, e.clientY);

@@ -10,6 +10,8 @@
  *  - GET  /api/range                           数据日期范围（SRV-04）
  *  - GET/PUT /api/settings                     白名单与软件元数据（SRV-05）
  *  - POST /api/ai-token-events                 请求级 Token 数字事件（Bearer token 鉴权）
+ *  - POST /api/hardware-samples                一分钟粒度硬件快照（Bearer token 鉴权）
+ *  - GET  /api/hardware/{current,series}        硬件当前值与趋势
  *  - GET  /api/ai-tokens/*                     Token 汇总、趋势、热力图与来源状态
  *  - 静态托管前端（http://localhost:8788/ 直接真数据预览）
  * ============================================================ */
@@ -20,6 +22,7 @@ const fs = require('fs');
 const db = require('./db');
 const agg = require('./aggregate');
 const tokenAgg = require('./token-aggregate');
+const hardwareAgg = require('./hardware-aggregate');
 
 /* ---------- 配置（首启自动生成 token） ---------- */
 const CONFIG_PATH = process.env.SIMMER_CONFIG_PATH || path.join(__dirname, 'config.json');
@@ -195,6 +198,87 @@ app.post('/api/ai-token-events', auth, (req, res) => {
   });
 });
 
+/* ---------- 硬件快照上报（CAP-06） ---------- */
+const MAX_HARDWARE_SAMPLES = 5000;
+const HARDWARE_MINUTE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+const HARDWARE_FIELDS = Object.freeze({
+  cpu: ['cpuLoad', 0, 100],
+  gpu: ['gpuLoad', 0, 100],
+  mem: ['memoryLoad', 0, 100],
+  vram: ['vramLoad', 0, 100],
+  cpuTemp: ['cpuTemp', 1, 150],
+  gpuTemp: ['gpuTemp', 1, 150],
+  power: ['powerWatts', 0, 5000],
+  disk: ['diskLoad', 0, 100],
+});
+
+function normalizeHardwareSample(sample) {
+  if (!sample || typeof sample !== 'object') return null;
+  const timestamp = HARDWARE_MINUTE.exec(sample.t || '');
+  if (!timestamp) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText] = timestamp;
+  const [year, month, day, hour, minute] = [yearText, monthText, dayText, hourText, minuteText].map(Number);
+  const calendarDay = new Date(year, month - 1, day);
+  if (calendarDay.getFullYear() !== year || calendarDay.getMonth() !== month - 1 ||
+      calendarDay.getDate() !== day || hour > 23 || minute > 59) return null;
+  const normalized = { t: sample.t };
+  let populated = false;
+  for (const [wireName, [storeName, min, max]] of Object.entries(HARDWARE_FIELDS)) {
+    const value = sample[wireName];
+    if (value === null || value === undefined) {
+      normalized[storeName] = null;
+      continue;
+    }
+    if ((wireName === 'cpuTemp' || wireName === 'gpuTemp') && value === 0) {
+      normalized[storeName] = null;
+      continue;
+    }
+    if (!Number.isFinite(value) || value < min || value > max) return null;
+    normalized[storeName] = value;
+    populated = true;
+  }
+  return populated ? normalized : null;
+}
+
+const upsertHardwareSample = db.prepare(`
+  INSERT INTO hardware_samples (
+    device_id, ts, cpu_load, gpu_load, memory_load, vram_load,
+    cpu_temp, gpu_temp, power_watts, disk_load
+  ) VALUES (
+    @deviceId, @t, @cpuLoad, @gpuLoad, @memoryLoad, @vramLoad,
+    @cpuTemp, @gpuTemp, @powerWatts, @diskLoad
+  ) ON CONFLICT(device_id, ts) DO UPDATE SET
+    cpu_load=COALESCE(excluded.cpu_load, hardware_samples.cpu_load),
+    gpu_load=COALESCE(excluded.gpu_load, hardware_samples.gpu_load),
+    memory_load=COALESCE(excluded.memory_load, hardware_samples.memory_load),
+    vram_load=COALESCE(excluded.vram_load, hardware_samples.vram_load),
+    cpu_temp=COALESCE(excluded.cpu_temp, hardware_samples.cpu_temp),
+    gpu_temp=COALESCE(excluded.gpu_temp, hardware_samples.gpu_temp),
+    power_watts=COALESCE(excluded.power_watts, hardware_samples.power_watts),
+    disk_load=COALESCE(excluded.disk_load, hardware_samples.disk_load)
+`);
+const storeHardwareBatch = db.transaction((deviceId, samples) => {
+  for (const sample of samples) upsertHardwareSample.run({ deviceId, ...sample });
+});
+
+app.post('/api/hardware-samples', auth, (req, res) => {
+  const { deviceId, deviceName, samples } = req.body || {};
+  if (!safeText(deviceId, 200, { allowEmpty: false }) ||
+      !safeText(deviceName, 200, { allowEmpty: false }) ||
+      !Array.isArray(samples) || samples.length > MAX_HARDWARE_SAMPLES) {
+    return res.status(400).json({ error: 'bad_request' });
+  }
+  const normalized = samples.map(normalizeHardwareSample);
+  if (normalized.some(sample => !sample)) {
+    return res.status(400).json({ error: 'invalid_hardware_payload' });
+  }
+
+  const paused = registerDevice(deviceId, deviceName, new Date().toISOString());
+  if (paused) return res.json({ ok: true, received: 0, skipped: normalized.length, paused: true });
+  storeHardwareBatch(deviceId, normalized);
+  res.json({ ok: true, received: normalized.length });
+});
+
 /* ---------- 查询（与前端 data.js 同构） ---------- */
 // 未提供 apps = 不筛选；显式 apps= = 空集合（白名单清空后应返回零数据）。
 const csv = s => s === undefined
@@ -241,6 +325,13 @@ app.get('/api/app-totals', (req, res) =>
 app.get('/api/app-weekday', (req, res) =>
   res.json(agg.appWeekday(req.query.device || 'all', req.query.app || '')));
 app.get('/api/range', (req, res) => res.json(agg.rangeInfo()));
+app.get('/api/hardware/current', (req, res) =>
+  res.json(hardwareAgg.current(req.query.device || 'all', req.query.metric || '')));
+app.get('/api/hardware/series', (req, res) =>
+  res.json(hardwareAgg.series(
+    req.query.device || 'all', req.query.metric || '',
+    ['daily', 'weekly', 'total'].includes(req.query.range) ? req.query.range : 'daily'
+  )));
 
 const tokenFilters = query => ({
   sources: csv(query.sources),
