@@ -1,0 +1,11 @@
+.git
+.gitignore
+collector
+docs
+server/config.json
+server/data
+server/node_modules
+**/*.log
+**/bin
+**/obj
+**/target

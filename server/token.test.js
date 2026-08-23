@@ -134,6 +134,14 @@ test('Token 汇总、筛选、分组、热力图和来源状态返回一致数�
   const sourceRows = await request('/api/ai-tokens/sources?device=test-pc');
   assert.equal(sourceRows.body.length, 3);
   assert.equal(sourceRows.body.find(row => row.source === 'dsh').state, 'not_found');
+
+  const selectedDay = await request(`/api/ai-tokens/summary?device=test-pc&range=daily&date=${today}`);
+  assert.equal(selectedDay.body.totalTokens, 225);
+  const modelTrend = await request(`/api/ai-tokens/trend?device=test-pc&range=daily&date=${today}&groupBy=model`);
+  assert.deepEqual(modelTrend.body.series.map(series => series.id), ['glm-5.3', 'gpt-5.6-sol']);
+  assert.equal(modelTrend.body.series.reduce(
+    (sum, series) => sum + series.values.reduce((inner, value) => inner + value, 0), 0
+  ), 225);
 });
 
 test('本地来源消失后累计历史仍保留，并显示历史已保存', async () => {
@@ -165,4 +173,42 @@ test('本地来源消失后累计历史仍保留，并显示历史已保存', as
   assert.equal(zcode.state, 'history_only');
   assert.equal(zcode.detailCode, 'server_history_only');
   assert.equal(dsh.state, 'not_found');
+});
+
+test('设备可改名、暂停并恢复软件与 Token 统计', async () => {
+  const renamed = await request('/api/devices/test-pc', {
+    method: 'PATCH', body: { name: '腾讯云开发机', paused: true },
+  });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.body.name, '腾讯云开发机');
+  assert.equal(renamed.body.reportedName, 'Test PC');
+  assert.equal(renamed.body.paused, true);
+
+  const minute = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T12:00`;
+  const pausedUsage = await request('/api/ingest', {
+    method: 'POST', authorized: true,
+    body: { deviceId: 'test-pc', deviceName: 'Test PC', minutes: [{ t: minute, app: 'Code.exe' }] },
+  });
+  assert.deepEqual(pausedUsage.body, { ok: true, received: 0, skipped: 1, paused: true });
+
+  const pausedToken = await request('/api/ai-token-events', {
+    method: 'POST', authorized: true,
+    body: {
+      deviceId: 'test-pc', deviceName: 'Test PC',
+      events: [{ ...events[0], sourceEventId: eventId('paused-token-event') }], statuses: [],
+    },
+  });
+  assert.equal(pausedToken.body.paused, true);
+  assert.equal(db.prepare('SELECT COUNT(*) FROM ai_token_events').pluck().get(), 2);
+
+  const resumed = await request('/api/devices/test-pc', { method: 'PATCH', body: { paused: false } });
+  assert.equal(resumed.body.paused, false);
+  const resumedUsage = await request('/api/ingest', {
+    method: 'POST', authorized: true,
+    body: { deviceId: 'test-pc', deviceName: 'Collector Name', minutes: [{ t: minute, app: 'Code.exe' }] },
+  });
+  assert.equal(resumedUsage.body.received, 1);
+  const devices = await request('/api/devices');
+  assert.equal(devices.body[0].name, '腾讯云开发机');
+  assert.equal(devices.body[0].reportedName, 'Collector Name');
 });

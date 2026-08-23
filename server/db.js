@@ -20,6 +20,8 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS devices (
   device_id   TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
+  custom_name TEXT,
+  paused      INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1)),
   first_seen  TEXT NOT NULL,
   last_seen   TEXT NOT NULL
 );
@@ -65,5 +67,10 @@ CREATE TABLE IF NOT EXISTS ai_source_status (
   PRIMARY KEY (device_id, source)
 ) WITHOUT ROWID;
 `);
+
+// 兼容已有数据库：设备别名不会再被后续采集上报覆盖，暂停状态由服务端统一控制。
+const deviceColumns = new Set(db.prepare('PRAGMA table_info(devices)').all().map(column => column.name));
+if (!deviceColumns.has('custom_name')) db.exec('ALTER TABLE devices ADD COLUMN custom_name TEXT');
+if (!deviceColumns.has('paused')) db.exec('ALTER TABLE devices ADD COLUMN paused INTEGER NOT NULL DEFAULT 0');
 
 module.exports = db;

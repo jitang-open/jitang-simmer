@@ -69,9 +69,22 @@ body {
   text-transform: uppercase; margin-bottom: 10px; font-weight: 700;
 }
 .side-dev { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
+.side-dev.paused { opacity: .62; }
 .side-dev .sd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(29,185,84,.8); }
+.side-dev.paused .sd-dot { background: var(--text-3); box-shadow: none; }
+.side-dev-copy { min-width: 0; flex: 1; }
 .side-dev .sd-name { font-size: 12.5px; font-weight: 600; }
 .side-dev .sd-host { font-size: 11px; color: var(--text-3); font-family: Consolas, monospace; }
+.side-dev-actions { display: flex; gap: 3px; opacity: .25; transition: opacity .18s; }
+.side-dev:hover .side-dev-actions { opacity: 1; }
+.side-dev-action {
+  width: 25px; height: 25px; display: grid; place-items: center; padding: 0;
+  color: var(--text-2); background: #171b21; border: 1px solid var(--border);
+  border-radius: 6px; cursor: pointer; transition: color .16s, border-color .16s;
+}
+.side-dev-action:hover { color: var(--green-hi); border-color: var(--green); }
+.side-dev-action svg { width: 12px; height: 12px; fill: currentColor; }
+.side-dev-action.resume { color: var(--green-hi); }
 
 .side-foot { font-size: 11.5px; color: var(--text-2); line-height: 1.7; padding: 12px 10px 0; border-top: 1px solid var(--border); }
 .dot-live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green-hi); margin-right: 4px; animation: pulse 1.6s infinite; }
@@ -155,6 +168,53 @@ body {
 .range-tabs button:hover { color: var(--text); }
 .range-tabs button.on { background: var(--green); color: #06110a; box-shadow: 0 2px 10px rgba(29,185,84,.4); }
 
+.period-control, .token-period-control { display: flex; align-items: center; gap: 7px; }
+.period-tabs { display: flex; background: #131820; border: 1px solid var(--border-hi); border-radius: 8px; padding: 3px; }
+.period-tabs button {
+  background: none; border: none; color: var(--text-2); padding: 5px 10px;
+  border-radius: 6px; cursor: pointer; font: 700 11.5px var(--font); transition: all .2s;
+}
+.period-tabs button:hover { color: var(--text); }
+.period-tabs button.on { background: var(--green); color: #06110a; box-shadow: 0 2px 8px rgba(29,185,84,.28); }
+.period-select .period-select-btn {
+  width: 172px; height: 34px; justify-content: space-between; padding: 6px 10px;
+  background: #131820; border-radius: 8px; font-size: 11.5px;
+}
+.period-select .calendar-icon { color: var(--green-hi); font-size: 14px; line-height: 1; }
+.period-select .period-calendar {
+  right: 0; left: auto; width: 286px; min-width: 286px; max-height: none;
+  padding: 9px; overflow: visible;
+}
+.calendar-head { display: grid; grid-template-columns: 30px 1fr 30px; align-items: center; margin-bottom: 7px; }
+.calendar-head strong { text-align: center; color: var(--text); font-size: 12.5px; }
+.calendar-head button {
+  width: 28px; height: 28px; color: var(--text-2); background: transparent;
+  border: 1px solid transparent; border-radius: 7px; cursor: pointer; font: 700 20px/1 var(--font);
+  transition: color .15s, background .15s, border-color .15s, transform .15s;
+}
+.calendar-head button:hover { color: var(--green-hi); background: #252b34; border-color: var(--border-hi); transform: scale(1.05); }
+.calendar-weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.calendar-weekdays { margin-bottom: 3px; }
+.calendar-weekdays span { color: var(--text-3); text-align: center; font-size: 9.5px; padding: 3px 0; }
+.calendar-days button, .calendar-months button {
+  border: 1px solid transparent; color: var(--text-2); background: transparent;
+  border-radius: 7px; cursor: pointer; font: 600 11px var(--font);
+  transition: color .14s, background .14s, border-color .14s, transform .14s;
+}
+.calendar-days button { height: 30px; }
+.calendar-days button:hover:not(:disabled), .calendar-months button:hover:not(:disabled) {
+  color: var(--text); background: #2a313a; border-color: var(--border-hi); transform: translateY(-1px);
+}
+.calendar-days button.outside { color: #4c5561; }
+.calendar-days button.in-range { color: #b8f5ca; background: rgba(29,185,84,.12); border-radius: 3px; }
+.calendar-days button.sel, .calendar-months button.sel {
+  color: #06110a; background: var(--green); border-color: var(--green-hi);
+  border-radius: 7px; box-shadow: 0 2px 8px rgba(29,185,84,.3);
+}
+.calendar-days button:disabled, .calendar-months button:disabled { opacity: .22; cursor: not-allowed; }
+.calendar-months { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.calendar-months button { height: 38px; }
+
 /* ---------------- 卡片通用 ---------------- */
 .card {
   background: var(--card); border: 1px solid var(--border);
@@ -237,6 +297,8 @@ body {
   filter: drop-shadow(0 0 5px rgba(57, 211, 83, .9));
   stroke: rgba(255,255,255,.55); stroke-width: 1px;
 }
+.hm-cell.selected { stroke: #fff; stroke-width: 1.8px; filter: drop-shadow(0 0 6px rgba(255,255,255,.72)); }
+.hm-cell:focus-visible { outline: none; stroke: #fff; stroke-width: 1.8px; }
 .hm-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 8px; color: var(--text-3); font-size: 11px; }
 .hm-legend i { width: 10px; height: 10px; border-radius: 2.5px; display: inline-block; }
 .hm-legend .lv0 { background: var(--gh-0); border: 1px solid var(--border-hi); }
@@ -351,9 +413,27 @@ body {
 .token-select .ds-btn:hover,
 .token-select.open .ds-btn { border-color: #a259ff; box-shadow: 0 0 0 2px rgba(162,89,255,.14); }
 .token-select .ds-list { left: 0; right: auto; min-width: 180px; }
+.token-multi-select .ds-list { min-width: 230px; }
+.token-multi-select .ds-opt::before {
+  content: ''; width: 13px; height: 13px; border: 1px solid var(--border-hi);
+  border-radius: 4px; flex: 0 0 auto; transition: background .15s, border-color .15s;
+}
+.token-multi-select .ds-opt.sel::before {
+  content: '✓'; display: grid; place-items: center; color: #0d0715;
+  background: #bc8cff; border-color: #bc8cff; font-size: 10px; font-weight: 900;
+}
 .token-range-tabs { height: 34px; background: #131820; border-radius: 8px; }
 .token-range-tabs button { padding: 5px 8px; font-size: 11px; }
 .token-range-tabs button.on { background: #a259ff; color: #0d0715; box-shadow: 0 2px 10px rgba(162,89,255,.34); }
+.token-period-control .period-select .period-select-btn:hover,
+.token-period-control .period-select.open .period-select-btn { border-color: #a259ff; box-shadow: 0 0 0 2px rgba(162,89,255,.14); }
+.token-period-control .period-select .calendar-icon { color: #bc8cff; }
+.token-period-control .calendar-head button:hover { color: #bc8cff; }
+.token-period-control .calendar-days button.in-range { color: #e0ccff; background: rgba(162,89,255,.13); }
+.token-period-control .calendar-days button.sel,
+.token-period-control .calendar-months button.sel {
+  color: #0d0715; background: #a259ff; border-color: #bc8cff; box-shadow: 0 2px 8px rgba(162,89,255,.28);
+}
 .token-statuses { display: flex; flex-wrap: wrap; gap: 7px; margin: -2px 0 14px; }
 .token-status {
   display: flex; align-items: center; gap: 8px; background: #131820;
@@ -405,6 +485,9 @@ body {
 .token-rank-value { text-align: right; color: #c9a7ff; font-size: 11.5px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .token-rank-value small { display: block; color: var(--text-3); font-size: 8.5px; font-weight: 500; }
 .token-rank-empty { color: var(--text-3); font-size: 11.5px; padding: 18px; text-align: center; }
+.multi-line-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 2px 0 6px 38px; }
+.multi-line-legend span { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-size: 10px; }
+.multi-line-legend i { width: 13px; height: 3px; border-radius: 99px; }
 
 @media (max-width: 860px) {
   .token-head { align-items: flex-start; flex-direction: column; }
@@ -420,6 +503,12 @@ body {
   .token-panel-wide { grid-column: auto; }
   .token-summary { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
   .token-rank-row { grid-template-columns: 100px 1fr 62px; }
+  .card-head { flex-direction: column; }
+  .period-control { width: 100%; justify-content: space-between; }
+  .token-period-control { align-items: stretch; flex-direction: column; }
+  .period-select { flex: 1; min-width: 0; }
+  .period-select .period-select-btn { width: 100%; }
+  .period-select .period-calendar { left: 0; right: auto; }
 }
 
 /* ---------------- 硬件监控 ---------------- */

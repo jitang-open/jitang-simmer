@@ -4,6 +4,7 @@
  *  - 只读取请求级数字事件，不涉及提示词、回复或本地路径
  * ============================================================ */
 const db = require('./db');
+const { dayStr, eachDay, rangeBounds } = require('./time-range');
 
 const SOURCES = ['codex', 'zcode', 'dsh'];
 const TOKEN_COLUMNS = [
@@ -15,7 +16,6 @@ const TOKEN_COLUMNS = [
   'total_tokens',
 ];
 const pad = n => String(n).padStart(2, '0');
-const dayStr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const now = () => new Date();
 
 function deviceIds(device) {
@@ -30,18 +30,16 @@ function normalizeFilter(values) {
   return [...new Set(values.map(value => String(value).trim()).filter(Boolean))];
 }
 
-function rangeSql(range, reference = now()) {
-  if (range === 'daily') {
-    return { sql: " AND date(occurred_at, 'localtime')=?", params: [dayStr(reference)] };
-  }
-  if (range === 'weekly') {
-    const start = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate() - 6);
-    return { sql: " AND date(occurred_at, 'localtime')>=?", params: [dayStr(start)] };
-  }
+function rangeSql(range, anchor, reference = now()) {
+  const bounds = rangeBounds(range, anchor, reference);
+  if (bounds) return {
+    sql: " AND date(occurred_at, 'localtime')>=? AND date(occurred_at, 'localtime')<=?",
+    params: [dayStr(bounds.start), dayStr(bounds.end)],
+  };
   return { sql: '', params: [] };
 }
 
-function scope(device, filters = {}, range = 'total', extraSql = '') {
+function scope(device, filters = {}, range = 'total', extraSql = '', anchor) {
   const ids = deviceIds(device);
   const params = [];
   let sql = ' WHERE 1=1';
@@ -64,7 +62,7 @@ function scope(device, filters = {}, range = 'total', extraSql = '') {
     params.push(...values);
   }
 
-  const rangePart = rangeSql(range);
+  const rangePart = rangeSql(range, anchor);
   sql += rangePart.sql + extraSql;
   params.push(...rangePart.params);
   return { sql, params };
@@ -82,14 +80,14 @@ function rowToSummary(row = {}) {
   };
 }
 
-function summary(device, filters, range) {
-  const { sql, params } = scope(device, filters, range);
+function summary(device, filters, range, anchor) {
+  const { sql, params } = scope(device, filters, range, '', anchor);
   const sums = TOKEN_COLUMNS.map(column => `COALESCE(SUM(${column}), 0) AS ${column}`).join(', ');
   const row = db.prepare(`SELECT ${sums}, COUNT(*) AS event_count FROM ai_token_events ${sql}`).get(...params);
   return rowToSummary(row);
 }
 
-function trend(device, filters, range) {
+function trend(device, filters, range, anchor, groupByModel = false) {
   const reference = now();
   const labels = [];
   const keys = [];
@@ -101,13 +99,15 @@ function trend(device, filters, range) {
       keys.push(pad(hour));
       labels.push(`${hour}:00`);
     }
-  } else if (range === 'weekly') {
+  } else if (range === 'weekly' || range === 'monthly') {
     keySql = "date(occurred_at, 'localtime')";
     const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    for (let offset = 6; offset >= 0; offset--) {
-      const date = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate() - offset);
+    const bounds = rangeBounds(range, anchor, reference);
+    for (const date of eachDay(bounds.start, bounds.end)) {
       keys.push(dayStr(date));
-      labels.push(`${weekdays[date.getDay()]} ${date.getMonth() + 1}/${date.getDate()}`);
+      labels.push(range === 'weekly'
+        ? `${weekdays[date.getDay()]} ${date.getMonth() + 1}/${date.getDate()}`
+        : `${date.getMonth() + 1}/${date.getDate()}`);
     }
   } else {
     keySql = "strftime('%Y-%m', occurred_at, 'localtime')";
@@ -119,9 +119,31 @@ function trend(device, filters, range) {
   }
 
   const { sql, params } = scope(
-    device, filters, range, ` AND ${keySql} IN (${keys.map(() => '?').join(',')})`
+    device, filters, range, ` AND ${keySql} IN (${keys.map(() => '?').join(',')})`, anchor
   );
   params.push(...keys);
+  if (groupByModel) {
+    const rows = db.prepare(
+      `SELECT ${keySql} AS bucket,
+              CASE WHEN model='' THEN 'unknown' ELSE model END AS model,
+              SUM(total_tokens) AS tokens
+       FROM ai_token_events ${sql}
+       GROUP BY bucket, model`
+    ).all(...params);
+    const byModel = new Map();
+    for (const row of rows) {
+      if (!byModel.has(row.model)) byModel.set(row.model, new Map());
+      byModel.get(row.model).set(row.bucket, Number(row.tokens));
+    }
+    return {
+      labels,
+      series: [...byModel].sort(([left], [right]) => left.localeCompare(right)).map(([id, values]) => ({
+        id,
+        values: keys.map(key => values.get(key) || 0),
+      })),
+      unit: 'tokens',
+    };
+  }
   const rows = db.prepare(
     `SELECT ${keySql} AS bucket, SUM(total_tokens) AS tokens FROM ai_token_events ${sql} GROUP BY bucket`
   ).all(...params);
@@ -149,10 +171,10 @@ function yearSeries(device, filters, year) {
   return result;
 }
 
-function breakdown(device, filters, range, dimension) {
+function breakdown(device, filters, range, dimension, anchor) {
   const columns = { source: 'source', provider: 'provider', model: 'model' };
   const column = columns[dimension] || columns.source;
-  const { sql, params } = scope(device, filters, range);
+  const { sql, params } = scope(device, filters, range, '', anchor);
   return db.prepare(
     `SELECT CASE WHEN ${column}='' THEN 'unknown' ELSE ${column} END AS id,
             SUM(total_tokens) AS tokens, COUNT(*) AS event_count

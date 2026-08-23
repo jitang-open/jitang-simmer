@@ -10,14 +10,15 @@
  * 为每张点阵图独立建立比例色阶。
  * 使用最近秩 P95 作为满色上限，避免极少数异常高值压暗其余日期。
  */
-function buildHeatmapScale(days, valueKey = 'minutes') {
+function buildHeatmapScale(days, valueKey = 'minutes', hardCap = Infinity) {
   const values = days
     .map(day => day && day[valueKey])
     .filter(minutes => Number.isFinite(minutes) && minutes > 0)
     .sort((a, b) => a - b);
-  const capMinutes = values.length
+  const p95 = values.length
     ? values[Math.ceil(values.length * 0.95) - 1]
     : 0;
+  const capMinutes = Number.isFinite(hardCap) && hardCap > 0 ? Math.min(p95, hardCap) : p95;
   const thresholds = capMinutes > 0
     ? Array.from({ length: 8 }, (_, index) => capMinutes * (index + 1) / 8)
     : [];
@@ -70,6 +71,7 @@ const Charts = (() => {
     return n;
   }
   const fmtDate = d => `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日 · ${['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]}`;
+  const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const fmtMin = m => {
     const h = Math.floor(m / 60), mm = Math.round(m % 60);
     return h > 0 ? `${h} 小时 ${mm} 分钟` : `${mm} 分钟`;
@@ -91,7 +93,7 @@ const Charts = (() => {
     const cols = Math.ceil((firstDow + n) / rows);
     const W = left + cols * (cell + gap) + 8;
     const H = top + rows * (cell + gap) + 2;
-    const scale = buildHeatmapScale(days, valueKey);
+    const scale = buildHeatmapScale(days, valueKey, config.maxValue);
 
     const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'hm-svg' });
     svg.style.width = '100%';
@@ -132,6 +134,8 @@ const Charts = (() => {
           width: cell, height: cell, rx: 2.5,
           fill: LEVELS[lv], class: 'hm-cell',
         });
+        const selected = config.selectedDate && isoDate(d.date) === config.selectedDate;
+        if (selected) rect.classList.add('selected');
         if (lv === 0) rect.setAttribute('stroke', '#21262d');
         rect.style.animationDelay = Math.min(c * 14 + r * 12, 1100) + 'ms';
         rect.addEventListener('mouseenter', e => {
@@ -142,6 +146,16 @@ const Charts = (() => {
         });
         rect.addEventListener('mousemove', e => moveTip(e.clientX, e.clientY));
         rect.addEventListener('mouseleave', hideTip);
+        if (typeof config.onSelect === 'function' && value !== null) {
+          rect.setAttribute('role', 'button');
+          rect.setAttribute('tabindex', '0');
+          rect.setAttribute('aria-label', `${fmtDate(d.date)}，${formatValue(value)}`);
+          const select = () => config.onSelect({ ...d, date: new Date(d.date) });
+          rect.addEventListener('click', select);
+          rect.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(); }
+          });
+        }
         svg.appendChild(rect);
       }
     }
@@ -247,6 +261,119 @@ const Charts = (() => {
     overlay.addEventListener('mouseleave', () => { guide.style.opacity = 0; dot.style.opacity = 0; hideTip(); });
     svg.appendChild(overlay);
 
+    container.appendChild(svg);
+  }
+
+  /* ============================================================
+   * 多序列折线图：同一横轴同时对比多个模型
+   * cfg.series: [{id,label,color,values,rawValues}]
+   * ============================================================ */
+  function multiline(container, cfg) {
+    container.innerHTML = '';
+    const labels = Array.isArray(cfg.labels) ? cfg.labels : [];
+    const series = (cfg.series || []).filter(item => Array.isArray(item.values));
+    if (!labels.length || !series.length) {
+      container.innerHTML = '<div class="token-rank-empty">当前范围暂无可绘制的模型趋势</div>';
+      return;
+    }
+
+    const legend = document.createElement('div');
+    legend.className = 'multi-line-legend';
+    legend.innerHTML = series.map(item =>
+      `<span title="${escapeHTML(item.label || item.id)}"><i style="background:${safeColor(item.color)}"></i>${escapeHTML(item.label || item.id)}</span>`
+    ).join('');
+    container.appendChild(legend);
+
+    const W = 640, H = cfg.height || 190, P = { l: 42, r: 12, t: 14, b: 24 };
+    const n = labels.length;
+    const allValues = series.flatMap(item => item.values).map(Number).filter(Number.isFinite);
+    const peak = Math.max(...allValues, 0.001);
+    const max = peak * 1.15;
+    const iw = W - P.l - P.r, ih = H - P.t - P.b;
+    const X = index => P.l + (n === 1 ? iw / 2 : index * iw / (n - 1));
+    const Y = value => P.t + ih - ((Number(value) || 0) / max) * ih;
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}` });
+    svg.style.width = '100%';
+
+    for (let grid = 0; grid <= 3; grid++) {
+      const value = peak * grid / 3;
+      const y = Y(value);
+      svg.appendChild(el('line', { x1: P.l, x2: W - P.r, y1: y, y2: y, class: 'lc-grid' }));
+      const textNode = el('text', { x: P.l - 7, y: y + 3, 'text-anchor': 'end', class: 'lc-axis' });
+      textNode.textContent = value >= 100 ? Math.round(value) : +value.toFixed(1);
+      svg.appendChild(textNode);
+    }
+    const step = Math.ceil(n / 8);
+    for (let index = 0; index < n; index += step) {
+      const textNode = el('text', { x: X(index), y: H - 7, 'text-anchor': 'middle', class: 'lc-axis' });
+      textNode.textContent = String(labels[index]).slice(0, 6);
+      svg.appendChild(textNode);
+    }
+
+    const smooth = points => {
+      if (points.length < 3) return `M${points.map(point => point.join(',')).join(' L')}`;
+      let path = `M${points[0][0]},${points[0][1]}`;
+      for (let index = 0; index < points.length - 1; index++) {
+        const p0 = points[Math.max(0, index - 1)], p1 = points[index];
+        const p2 = points[index + 1], p3 = points[Math.min(points.length - 1, index + 2)];
+        const lowY = Math.min(p1[1], p2[1]), highY = Math.max(p1[1], p2[1]);
+        const c1 = [
+          p1[0] + (p2[0] - p0[0]) / 6,
+          Math.max(lowY, Math.min(highY, p1[1] + (p2[1] - p0[1]) / 6)),
+        ];
+        const c2 = [
+          p2[0] - (p3[0] - p1[0]) / 6,
+          Math.max(lowY, Math.min(highY, p2[1] - (p3[1] - p1[1]) / 6)),
+        ];
+        path += ` C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+      }
+      return path;
+    };
+
+    series.forEach(item => {
+      const points = labels.map((_, index) => [X(index), Y(item.values[index])]);
+      svg.appendChild(el('path', {
+        d: smooth(points), stroke: safeColor(item.color), fill: 'none', class: 'lc-line',
+        'stroke-width': 2.2,
+      }));
+    });
+
+    const guide = el('line', { y1: P.t, y2: P.t + ih, class: 'lc-guide' });
+    svg.appendChild(guide);
+    const dots = series.map(item => {
+      const dot = el('circle', { r: 4, fill: safeColor(item.color), class: 'lc-dot' });
+      dot.setAttribute('stroke', '#0d1117'); dot.setAttribute('stroke-width', '2');
+      svg.appendChild(dot);
+      return dot;
+    });
+    const overlay = el('rect', { x: P.l, y: P.t, width: iw, height: ih, fill: 'transparent' });
+    let lastIndex = -1;
+    overlay.addEventListener('mousemove', event => {
+      const rectBox = svg.getBoundingClientRect();
+      const mouseX = (event.clientX - rectBox.left) * (W / rectBox.width);
+      let index = Math.round((mouseX - P.l) / (iw / (n - 1 || 1)));
+      index = Math.max(0, Math.min(n - 1, index));
+      guide.setAttribute('x1', X(index)); guide.setAttribute('x2', X(index)); guide.style.opacity = 1;
+      dots.forEach((dot, seriesIndex) => {
+        dot.setAttribute('cx', X(index)); dot.setAttribute('cy', Y(series[seriesIndex].values[index]));
+        dot.style.opacity = 1;
+      });
+      if (index !== lastIndex) {
+        lastIndex = index;
+        const rows = series.map(item => {
+          const raw = Array.isArray(item.rawValues) ? item.rawValues[index] : item.values[index];
+          const formatted = typeof cfg.valueFormatter === 'function' ? cfg.valueFormatter(raw) : `${raw}${cfg.unit || ''}`;
+          return `<span style="color:${safeColor(item.color)}">●</span> ${escapeHTML(item.label || item.id)}：<b>${escapeHTML(formatted)}</b>`;
+        }).join('<br>');
+        showTip(`<span class="tip-date">${escapeHTML(labels[index])}</span><br>${rows}`, event.clientX, event.clientY);
+      } else moveTip(event.clientX, event.clientY);
+    });
+    overlay.addEventListener('mouseleave', () => {
+      guide.style.opacity = 0;
+      dots.forEach(dot => { dot.style.opacity = 0; });
+      hideTip();
+    });
+    svg.appendChild(overlay);
     container.appendChild(svg);
   }
 
@@ -358,7 +485,7 @@ const Charts = (() => {
     }));
   }
 
-  return { init, heatmap, line, hbars, donut, vbars, fmtMin, showTip, hideTip };
+  return { init, heatmap, line, multiline, hbars, donut, vbars, fmtMin, showTip, hideTip };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = { buildHeatmapScale };

@@ -1,0 +1,40 @@
+services:
+  simmer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      SIMMER_HOST: 0.0.0.0
+      SIMMER_PORT: 8788
+      SIMMER_TOKEN: ${SIMMER_TOKEN:?请在 deploy/.env 中设置 SIMMER_TOKEN}
+    volumes:
+      - simmer_data:/app/server/data
+    restart: unless-stopped
+    networks: [simmer_internal]
+
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on:
+      simmer:
+        condition: service_healthy
+    environment:
+      SIMMER_DOMAIN: ${SIMMER_DOMAIN:?请设置腾讯云服务器所用域名}
+      DASHBOARD_USER: ${DASHBOARD_USER:?请设置面板用户名}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:?请设置 Caddy 密码哈希}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    networks: [simmer_internal]
+
+networks:
+  simmer_internal:
+
+volumes:
+  simmer_data:
+  caddy_data:
+  caddy_config:

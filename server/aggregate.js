@@ -6,14 +6,24 @@
  *  - apps 参数（可选数组）对应前端白名单过滤
  * ============================================================ */
 const db = require('./db');
+const { dayStr, eachDay, rangeBounds } = require('./time-range');
 
 const pad = n => String(n).padStart(2, '0');
-const dayStr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const now = () => new Date();
 
 /* ---------- 设备 ---------- */
 function devices() {
-  return db.prepare('SELECT device_id AS id, name, first_seen, last_seen FROM devices ORDER BY last_seen DESC').all();
+  return db.prepare(`
+    SELECT device_id AS id,
+           COALESCE(NULLIF(custom_name, ''), name) AS name,
+           name AS reportedName,
+           custom_name AS customName,
+           paused,
+           first_seen AS firstSeen,
+           last_seen AS lastSeen
+    FROM devices
+    ORDER BY last_seen DESC
+  `).all().map(device => ({ ...device, paused: !!device.paused }));
 }
 function deviceIds(device) {
   if (device && device !== 'all') return [device];
@@ -64,11 +74,11 @@ function yearSeries(device, apps, year) {
   return out;
 }
 
-/* ---------- 趋势：daily=今日24h / weekly=近7天 / total=近12个月 ---------- */
-function trendSeries(device, apps, range) {
+/* ---------- 趋势：daily=某日24h / weekly=某周 / monthly=某月 / total=近12个月 ---------- */
+function trendSeries(device, apps, range, anchor) {
   const n = now();
   if (range === 'daily') {
-    const day = dayStr(n);
+    const day = dayStr(rangeBounds('daily', anchor, n).start);
     const { sql, params } = scope(device, apps, ` AND substr(ts,1,10)=?`);
     params.push(day);
     const rows = db.prepare(
@@ -79,16 +89,18 @@ function trendSeries(device, apps, range) {
     for (let h = 0; h < 24; h++) { labels.push(h + ':00'); values.push(+( (map.get(h) || 0) / 60 ).toFixed(2)); }
     return { labels, values, unit: 'h' };
   }
-  if (range === 'weekly') {
+  if (range === 'weekly' || range === 'monthly') {
     const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     const labels = [], values = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(n.getTime() - i * 86400000);
+    const bounds = rangeBounds(range, anchor, n);
+    for (const d of eachDay(bounds.start, bounds.end)) {
       const day = dayStr(d);
       const { sql, params } = scope(device, apps, ` AND substr(ts,1,10)=?`);
       params.push(day);
       const r = db.prepare(`SELECT COUNT(*) AS m FROM usage_minutes ${sql}`).get(...params);
-      labels.push(wd[d.getDay()] + ' ' + (d.getMonth() + 1) + '/' + d.getDate());
+      labels.push(range === 'weekly'
+        ? wd[d.getDay()] + ' ' + (d.getMonth() + 1) + '/' + d.getDate()
+        : (d.getMonth() + 1) + '/' + d.getDate());
       values.push(+((r.m) / 60).toFixed(2));
     }
     return { labels, values, unit: 'h' };
@@ -108,11 +120,9 @@ function trendSeries(device, apps, range) {
 }
 
 /* ---------- 软件时长合计（降序） ---------- */
-function appTotals(device, apps, range) {
-  const n = now();
+function appTotals(device, apps, range, anchor) {
+  const bounds = rangeBounds(range, anchor, now());
   let dayFilter = '';
-  if (range === 'daily') dayFilter = ` AND substr(ts,1,10)='${dayStr(n)}'`;
-  else if (range === 'weekly') dayFilter = ` AND ts>='${dayStr(new Date(n.getTime() - 6 * 86400000))}'`;
 
   let appFilter = '';
   const base = [];
@@ -124,6 +134,10 @@ function appTotals(device, apps, range) {
     if (!apps.length) return [];
     appFilter = ` AND app IN (${apps.map(() => '?').join(',')})`;
     base.push(...apps);
+  }
+  if (bounds) {
+    dayFilter = ' AND substr(ts,1,10)>=? AND substr(ts,1,10)<=?';
+    base.push(dayStr(bounds.start), dayStr(bounds.end));
   }
 
   const rows = db.prepare(

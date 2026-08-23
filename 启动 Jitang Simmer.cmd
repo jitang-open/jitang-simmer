@@ -2,15 +2,22 @@
 setlocal
 
 set "ROOT=%~dp0"
-set "NODE22=C:\Users\jitang\.local\nodejs\node.exe"
+set "NODE24=node.exe"
 set "SERVER=%ROOT%server\index.js"
 set "COLLECTOR=%ROOT%collector\SimmerCollector.exe"
 set "TOKEN_SCANNER=%ROOT%collector\simmer-token-scan.exe"
 set "DASHBOARD=http://127.0.0.1:8788/index.html"
 
-if not exist "%NODE22%" (
-  echo [Jitang Simmer] Node.js 22 was not found:
-  echo %NODE22%
+where "%NODE24%" >nul 2>&1
+if errorlevel 1 (
+  echo [Jitang Simmer] Node.js 24 was not found in PATH.
+  goto :failed
+)
+
+"%NODE24%" --version | findstr /B /C:"v24." >nul
+if errorlevel 1 (
+  echo [Jitang Simmer] Node.js 24 is required. Current version:
+  "%NODE24%" --version
   goto :failed
 )
 
@@ -37,7 +44,7 @@ if not exist "%TOKEN_SCANNER%" (
 call :check_server
 if errorlevel 1 (
   echo [Jitang Simmer] Starting server...
-  start "Jitang Simmer Server" /min "%NODE22%" "%SERVER%"
+  start "Jitang Simmer Server" /min "%NODE24%" "%SERVER%"
 )
 
 set "SERVER_READY="

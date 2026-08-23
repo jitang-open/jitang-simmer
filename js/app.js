@@ -62,6 +62,10 @@ function saveAppsState() {
   queueServerSettingsSave();
 }
 
+function localISODate(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 const state = {
   device: 'all',                                        // all | desktop | laptop | htpc
   range: 'daily',                                       // daily | weekly | total
@@ -71,14 +75,18 @@ const state = {
   customApps: loadCustomApps(),                         // 自定义软件条目 / 元数据覆盖（localStorage）
   removedApps: loadRemovedApps(),                       // 已删除的软件 id（localStorage）
   offApps: loadOffApps(),                               // 添加过但开关关闭的软件 id（localStorage）
+  usageRange: 'daily',                                  // 软件卡片独立日 / 周 / 月范围
+  usageDate: localISODate(),                            // 软件卡片所选锚点日期
   tokenSource: '',                                      // AI Token 来源筛选
   tokenProvider: '',                                    // AI Token provider 筛选
-  tokenModel: '',                                       // AI Token 模型筛选
+  tokenModels: [],                                      // AI Token 多模型筛选（空数组=全部）
+  tokenRange: 'daily',                                  // Token 卡片独立日 / 周 / 月范围
+  tokenDate: localISODate(),                            // Token 卡片所选锚点日期
   usageTrendOpen: false,                                // 总时长趋势默认收起
   tokenTrendOpen: false,                                // Token 趋势默认收起
 };
 
-const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', total: '累计' };
+const RANGE_LABEL = { daily: '今日', weekly: '近 7 天', monthly: '本月', total: '累计' };
 const TOKEN_SOURCE_NAME = { codex: 'Codex', zcode: 'ZCode', dsh: 'DeepSeek Harness' };
 const TOKEN_STATUS = {
   ready: ['可用', 'ok'],
@@ -248,6 +256,16 @@ const PALETTE = [
   '#7c3aed', '#6366f1', '#818cf8', '#f472b6', '#fb7185', '#a8a29e',
 ];
 
+function modelColor(model) {
+  const colors = PALETTE.filter(color => !['#8b949e', '#c9d1d9', '#a8a29e'].includes(color));
+  let hash = 2166136261;
+  for (const char of String(model)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return colors[(hash >>> 0) % colors.length];
+}
+
 /** 清单 = 用户主动添加（whitelist）或添加后关闭（offApps）的软件；预添加未观测的自定义条目也显示。
  *  从未接触过的新检测进程不出现在面板，只在「添加」候选列表中出现。 */
 function mergedApps() {
@@ -276,7 +294,11 @@ function applyMeta(rows) {
 function buildDeviceSelect() {
   const opts = [{ id: 'all', name: '全部设备', host: '汇总统计' }, ...DB.devices];
   mountCustomSelect($('#deviceSelect'), {
-    options: opts.map(option => ({ value: option.id, label: option.name, meta: option.host })),
+    options: opts.map(option => ({
+      value: option.id,
+      label: option.name,
+      meta: option.paused ? `已暂停 · ${option.host}` : option.host,
+    })),
     value: state.device,
     showDot: true,
     onChange: value => { state.device = value; renderAll(); },
@@ -303,6 +325,146 @@ function buildRangeTabs() {
     button.addEventListener('click', () => setRange(button.dataset.range));
   });
   syncRangeTabs();
+}
+
+/* ---------------- 软件 / Token 独立日、周、月选择 ---------------- */
+function parseLocalDate(value) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  return matched ? new Date(+matched[1], +matched[2] - 1, +matched[3]) : new Date();
+}
+
+function periodBounds(range, dateValue) {
+  const selected = parseLocalDate(dateValue);
+  if (range === 'weekly') {
+    const start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() - (selected.getDay() + 6) % 7);
+    return { start, end: new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6) };
+  }
+  if (range === 'monthly') return {
+    start: new Date(selected.getFullYear(), selected.getMonth(), 1),
+    end: new Date(selected.getFullYear(), selected.getMonth() + 1, 0),
+  };
+  return { start: selected, end: selected };
+}
+
+function periodLabel(range, dateValue) {
+  const { start, end } = periodBounds(range, dateValue);
+  const short = date => `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+  if (range === 'daily') return `${start.getFullYear()} 年 ${short(start)}`;
+  if (range === 'monthly') return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`;
+  return `${start.getFullYear()} 年 ${short(start)} – ${short(end)}`;
+}
+
+function compactPeriodLabel(range, dateValue) {
+  const { start, end } = periodBounds(range, dateValue);
+  const short = date => `${date.getMonth() + 1}/${date.getDate()}`;
+  if (range === 'daily') return `${start.getFullYear()}/${short(start)}`;
+  if (range === 'monthly') return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`;
+  return `${start.getFullYear()} · ${short(start)} – ${short(end)}`;
+}
+
+function mountPeriodPicker(scope) {
+  const wrap = $(`#${scope}DatePicker`);
+  if (!wrap) return;
+  const range = state[`${scope}Range`];
+  const selectedDate = parseLocalDate(state[`${scope}Date`]);
+  let viewDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+  wrap.classList.remove('open');
+  wrap.innerHTML = `
+    <button type="button" class="ds-btn period-select-btn" aria-haspopup="dialog" aria-expanded="false">
+      <span class="calendar-icon">▦</span><span class="ds-name">${escapeHTML(compactPeriodLabel(range, state[`${scope}Date`]))}</span><span class="caret">▼</span>
+    </button>
+    <div class="ds-list period-calendar" role="dialog" aria-label="选择${range === 'daily' ? '日期' : range === 'weekly' ? '周' : '月份'}"></div>`;
+  const button = wrap.querySelector('.ds-btn');
+  const panel = wrap.querySelector('.period-calendar');
+
+  const renderPanel = () => {
+    const today = parseLocalDate(localISODate());
+    const selectedBounds = periodBounds(range, state[`${scope}Date`]);
+    const inSelectedRange = date => date >= selectedBounds.start && date <= selectedBounds.end;
+    if (range === 'monthly') {
+      panel.innerHTML = `
+        <div class="calendar-head">
+          <button type="button" data-calendar-nav="-1" aria-label="上一年">‹</button>
+          <strong>${viewDate.getFullYear()} 年</strong>
+          <button type="button" data-calendar-nav="1" aria-label="下一年">›</button>
+        </div>
+        <div class="calendar-months">${Array.from({ length: 12 }, (_, month) => {
+          const date = new Date(viewDate.getFullYear(), month, 1);
+          const future = date > new Date(today.getFullYear(), today.getMonth(), 1);
+          const selected = selectedDate.getFullYear() === date.getFullYear() && selectedDate.getMonth() === month;
+          return `<button type="button" data-calendar-date="${localISODate(date)}" class="${selected ? 'sel' : ''}" ${future ? 'disabled' : ''}>${month + 1} 月</button>`;
+        }).join('')}</div>`;
+    } else {
+      const first = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+      const gridStart = new Date(first.getFullYear(), first.getMonth(), first.getDate() - (first.getDay() + 6) % 7);
+      panel.innerHTML = `
+        <div class="calendar-head">
+          <button type="button" data-calendar-nav="-1" aria-label="上个月">‹</button>
+          <strong>${viewDate.getFullYear()} 年 ${viewDate.getMonth() + 1} 月</strong>
+          <button type="button" data-calendar-nav="1" aria-label="下个月">›</button>
+        </div>
+        <div class="calendar-weekdays">${['一','二','三','四','五','六','日'].map(day => `<span>${day}</span>`).join('')}</div>
+        <div class="calendar-days">${Array.from({ length: 42 }, (_, index) => {
+          const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index);
+          const outside = date.getMonth() !== viewDate.getMonth();
+          const future = date > today;
+          const selected = inSelectedRange(date);
+          const exact = localISODate(date) === state[`${scope}Date`];
+          return `<button type="button" data-calendar-date="${localISODate(date)}" class="${outside ? 'outside ' : ''}${selected ? 'in-range ' : ''}${exact ? 'sel' : ''}" ${future ? 'disabled' : ''}>${date.getDate()}</button>`;
+        }).join('')}</div>`;
+    }
+
+    panel.querySelectorAll('[data-calendar-nav]').forEach(nav => nav.addEventListener('click', event => {
+      event.stopPropagation();
+      const amount = Number(nav.dataset.calendarNav);
+      viewDate = range === 'monthly'
+        ? new Date(viewDate.getFullYear() + amount, viewDate.getMonth(), 1)
+        : new Date(viewDate.getFullYear(), viewDate.getMonth() + amount, 1);
+      renderPanel();
+    }));
+    panel.querySelectorAll('[data-calendar-date]').forEach(day => day.addEventListener('click', event => {
+      event.stopPropagation();
+      if (day.disabled) return;
+      wrap.classList.remove('open');
+      button.setAttribute('aria-expanded', 'false');
+      selectPeriod(scope, range, day.dataset.calendarDate);
+    }));
+  };
+
+  button.addEventListener('click', event => {
+    event.stopPropagation();
+    const opening = !wrap.classList.contains('open');
+    closeCustomSelects(wrap);
+    if (opening) renderPanel();
+    wrap.classList.toggle('open', opening);
+    button.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  });
+  panel.addEventListener('click', event => event.stopPropagation());
+}
+
+function syncPeriodControl(scope) {
+  const rangeKey = `${scope}Range`;
+  document.querySelectorAll(`[data-period-tabs="${scope}"] button`).forEach(button => {
+    button.classList.toggle('on', button.dataset.period === state[rangeKey]);
+  });
+  mountPeriodPicker(scope);
+}
+
+function selectPeriod(scope, range, dateValue = null) {
+  if (!['daily', 'weekly', 'monthly'].includes(range)) return;
+  state[`${scope}Range`] = range;
+  if (dateValue) state[`${scope}Date`] = dateValue;
+  syncPeriodControl(scope);
+  renderAll();
+}
+
+function buildPeriodControls() {
+  for (const scope of ['usage', 'token']) {
+    document.querySelectorAll(`[data-period-tabs="${scope}"] button`).forEach(button => {
+      button.addEventListener('click', () => selectPeriod(scope, button.dataset.period));
+    });
+    syncPeriodControl(scope);
+  }
 }
 
 /* ---------------- 侧边栏：滚动高亮（scroll-spy）+ 移动端抽屉 ---------------- */
@@ -376,11 +538,69 @@ function buildSidebar() {
 
 /* ---------------- 侧边栏：设备列表 ---------------- */
 function renderSideDevices() {
-  $('#sideDevices').innerHTML = '<div class="side-dev-title">我的设备</div>' + DB.devices.map(d => `
-    <div class="side-dev">
+  const EDIT_PATH = 'M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z';
+  const PAUSE_PATH = 'M6 5h4v14H6zm8 0h4v14h-4z';
+  const PLAY_PATH = 'M8 5v14l11-7z';
+  const wrap = $('#sideDevices');
+  wrap.innerHTML = '<div class="side-dev-title">我的设备</div>' + DB.devices.map(d => `
+    <div class="side-dev ${d.paused ? 'paused' : ''}" data-device-id="${escapeHTML(d.id)}">
       <span class="sd-dot"></span>
-      <div><div class="sd-name">${escapeHTML(d.name)}</div><div class="sd-host">${escapeHTML(d.host)}</div></div>
+      <div class="side-dev-copy"><div class="sd-name">${escapeHTML(d.name)}</div><div class="sd-host">${escapeHTML(d.paused ? '已暂停统计' : d.host)}</div></div>
+      <div class="side-dev-actions">
+        <button type="button" class="side-dev-action" data-device-action="rename" title="修改设备名"><svg viewBox="0 0 24 24"><path d="${EDIT_PATH}"/></svg></button>
+        <button type="button" class="side-dev-action ${d.paused ? 'resume' : ''}" data-device-action="pause" title="${d.paused ? '恢复统计' : '暂停统计'}"><svg viewBox="0 0 24 24"><path d="${d.paused ? PLAY_PATH : PAUSE_PATH}"/></svg></button>
+      </div>
     </div>`).join('');
+  wrap.querySelectorAll('.side-dev').forEach(row => {
+    const device = DB.devices.find(item => item.id === row.dataset.deviceId);
+    row.querySelector('[data-device-action="rename"]').addEventListener('click', () => openDeviceRename(device));
+    row.querySelector('[data-device-action="pause"]').addEventListener('click', () => updateDevice(device, { paused: !device.paused }));
+  });
+}
+
+async function updateDevice(device, changes) {
+  if (!device || typeof DB.updateDevice !== 'function') return;
+  try {
+    const updated = await DB.updateDevice(device.id, changes);
+    Object.assign(device, updated, { host: device.host || device.id, paused: !!updated.paused });
+    buildDeviceSelect();
+    renderSideDevices();
+    renderAll();
+  } catch (error) {
+    console.error('[simmer] 设备设置保存失败：', error);
+    window.alert('设备设置保存失败，请确认后端正在运行。');
+  }
+}
+
+function openDeviceRename(device) {
+  document.querySelectorAll('.app-form-overlay').forEach(dialog => dialog.remove());
+  const overlay = document.createElement('div');
+  overlay.className = 'app-form-overlay';
+  overlay.innerHTML = `
+    <div class="app-form" role="dialog" aria-modal="true" aria-labelledby="deviceFormTitle">
+      <h3 id="deviceFormTitle">修改设备名称</h3>
+      <label>显示名称</label>
+      <input class="device-name-input" maxlength="200" value="${escapeHTML(device.name)}" autocomplete="off">
+      <div class="hint-inline">采集端仍使用设备 ID ${escapeHTML(device.id)}；新名称不会被后续上报覆盖。</div>
+      <div class="af-btns">
+        <button class="btn-ghost af-cancel">取消</button>
+        <button class="btn-ghost device-save" style="border-color:var(--green);color:var(--green-hi)">保存</button>
+      </div>
+    </div>`;
+  const input = overlay.querySelector('.device-name-input');
+  const save = async () => {
+    const name = input.value.trim();
+    if (!name) { input.classList.add('af-invalid'); input.focus(); return; }
+    overlay.querySelector('.device-save').disabled = true;
+    await updateDevice(device, { name });
+    overlay.remove();
+  };
+  overlay.querySelector('.af-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.device-save').addEventListener('click', save);
+  input.addEventListener('keydown', event => { if (event.key === 'Enter') save(); });
+  overlay.addEventListener('click', event => { if (event.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  input.select();
 }
 
 /* ---------------- 总时长卡片：年份选择器（与设备选择器同款 UI） ---------------- */
@@ -404,9 +624,13 @@ const snapshotRenderState = () => ({
   range: state.range,
   year: state.year,
   appIds: wlIds(),
+  usageRange: state.usageRange,
+  usageDate: state.usageDate,
   tokenSource: state.tokenSource,
   tokenProvider: state.tokenProvider,
-  tokenModel: state.tokenModel,
+  tokenModels: [...state.tokenModels],
+  tokenRange: state.tokenRange,
+  tokenDate: state.tokenDate,
 });
 const isRenderCurrent = token => token === renderGeneration;
 
@@ -451,8 +675,12 @@ async function renderTotal(ctx, token) {
   const totalMin = year.reduce((s, d) => s + (d.minutes || 0), 0);
   const activeDays = year.filter(d => d.minutes > 0).length;
   $('#totalSub').textContent =
-    `${ctx.year} 年共 ${Math.floor(totalMin / 60).toLocaleString()} 小时 · ${activeDays} 天有使用记录 · 仅统计白名单软件`;
-  Charts.heatmap($('#heatmapWrap'), year);
+    `${ctx.year} 年共 ${Math.floor(totalMin / 60).toLocaleString()} 小时 · ${activeDays} 天有使用记录 · 色阶最高按 6 小时计算`;
+  Charts.heatmap($('#heatmapWrap'), year, {
+    maxValue: 360,
+    selectedDate: ctx.usageDate,
+    onSelect: day => selectPeriod('usage', 'daily', localISODate(day.date)),
+  });
   $('#trendHint').textContent = { daily: '今日 24 小时分布', weekly: '近 7 天每日合计', total: '近 12 个月每月合计' }[ctx.range];
   Charts.line($('#trendWrap'), {
     labels: trend.labels, values: trend.values,
@@ -464,9 +692,9 @@ async function renderTotal(ctx, token) {
 const COLLAPSE_AT = 10;   // 超过 10 款软件时默认折叠
 
 async function renderApps(ctx, token) {
-  const rows = applyMeta(await DB.appTotals(ctx.device, ctx.appIds, ctx.range));
+  const rows = applyMeta(await DB.appTotals(ctx.device, ctx.appIds, ctx.usageRange, ctx.usageDate));
   if (!isRenderCurrent(token)) return;
-  $('#appsSub').textContent = `${RANGE_LABEL[ctx.range]} · ${rows.length} 款白名单软件 · 按时长降序`;
+  $('#appsSub').textContent = `${periodLabel(ctx.usageRange, ctx.usageDate)} · ${rows.length} 款白名单软件 · 按时长降序`;
   const wrap = $('#appBars');
 
   const drawList = (list, collapsed) => {
@@ -537,20 +765,24 @@ async function renderApps(ctx, token) {
 
     const [wd, t, yearRows] = await Promise.all([
       DB.appWeekday(detailCtx.device, app.id),
-      DB.trendSeries(detailCtx.device, [app.id], detailCtx.range),
+      DB.trendSeries(detailCtx.device, [app.id], detailCtx.usageRange, detailCtx.usageDate),
       DB.yearSeries(detailCtx.device, [app.id], detailCtx.year),
     ]);
     if (!isRenderCurrent(detailToken) || !detail.isConnected || state.openApp !== app.id) return;
     const bodies = detail.querySelectorAll('.ad-body');
     Charts.vbars(bodies[0], { labels: wd.labels, values: wd.values, color: app.color, unit: ' 分钟（日均）' });
     Charts.line(bodies[1], { labels: t.labels, values: t.values, color: app.color, unit: ' h', height: 200 });
-    Charts.heatmap(bodies[2], yearRows);
+    Charts.heatmap(bodies[2], yearRows, {
+      maxValue: 360,
+      selectedDate: detailCtx.usageDate,
+      onSelect: day => selectPeriod('usage', 'daily', localISODate(day.date)),
+    });
   }
 }
 
 /* ---------------- 饼图（图例 >10 折叠） ---------------- */
 async function renderPie(ctx, token) {
-  const rows = (await DB.appTotals(ctx.device, ctx.appIds, ctx.range)).filter(r => r.minutes > 0);
+  const rows = (await DB.appTotals(ctx.device, ctx.appIds, ctx.usageRange, ctx.usageDate)).filter(r => r.minutes > 0);
   if (!isRenderCurrent(token)) return;
   Charts.donut($('#pieWrap'), $('#pieLegend'), applyMeta(rows));
 
@@ -582,6 +814,47 @@ function fillTokenFilter(selector, values, selected, stateKey, labeler = value =
     ],
     value: selected,
     onChange: value => { state[stateKey] = value; renderAll(); },
+  });
+}
+
+function mountTokenModelFilter(values, selectedValues) {
+  const wrap = $('#tokenModelFilter');
+  const wasOpen = wrap.classList.contains('open');
+  const selected = new Set(selectedValues);
+  const label = selected.size ? `已选 ${selected.size} 个模型` : '全部模型';
+  wrap.innerHTML = `
+    <button type="button" class="ds-btn" aria-haspopup="listbox" aria-expanded="${wasOpen ? 'true' : 'false'}" title="${escapeHTML(label)}">
+      <span class="ds-name">${escapeHTML(label)}</span><span class="caret">▼</span>
+    </button>
+    <div class="ds-list" role="listbox"></div>`;
+  wrap.classList.toggle('open', wasOpen);
+  const button = wrap.querySelector('.ds-btn');
+  const list = wrap.querySelector('.ds-list');
+  const addOption = (value, optionLabel, isSelected, all = false) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `ds-opt${isSelected ? ' sel' : ''}`;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    option.innerHTML = `<span class="ds-opt-label">${escapeHTML(optionLabel)}</span>`;
+    option.addEventListener('click', event => {
+      event.stopPropagation();
+      if (all) selected.clear();
+      else if (selected.has(value)) selected.delete(value);
+      else selected.add(value);
+      state.tokenModels = [...selected];
+      renderAll();
+    });
+    list.appendChild(option);
+  };
+  addOption('', '全部模型', selected.size === 0, true);
+  values.forEach(value => addOption(value, value, selected.has(value)));
+  button.addEventListener('click', event => {
+    event.stopPropagation();
+    const opening = !wrap.classList.contains('open');
+    closeCustomSelects(wrap);
+    wrap.classList.toggle('open', opening);
+    button.setAttribute('aria-expanded', opening ? 'true' : 'false');
   });
 }
 
@@ -617,21 +890,21 @@ async function renderTokens(ctx, token) {
   const choose = (value, values) => values.includes(value) ? value : '';
   const source = choose(ctx.tokenSource, dimensions.sources);
   const provider = choose(ctx.tokenProvider, dimensions.providers);
-  const model = choose(ctx.tokenModel, dimensions.models);
+  const models = ctx.tokenModels.filter(model => dimensions.models.includes(model));
   state.tokenSource = source;
   state.tokenProvider = provider;
-  state.tokenModel = model;
+  state.tokenModels = models;
   fillTokenFilter('#tokenSourceFilter', dimensions.sources, source, 'tokenSource', value => TOKEN_SOURCE_NAME[value] || value);
   fillTokenFilter('#tokenProviderFilter', dimensions.providers, provider, 'tokenProvider');
-  fillTokenFilter('#tokenModelFilter', dimensions.models, model, 'tokenModel');
+  mountTokenModelFilter(dimensions.models, models);
 
-  const filters = { source, provider, model };
+  const filters = { source, provider, models };
   const [summary, trend, year, sourceRows, modelRows, statuses] = await Promise.all([
-    DB.tokenSummary(ctx.device, ctx.range, filters),
-    DB.tokenTrend(ctx.device, ctx.range, filters),
+    DB.tokenSummary(ctx.device, ctx.tokenRange, filters, ctx.tokenDate),
+    DB.tokenTrend(ctx.device, ctx.tokenRange, filters, ctx.tokenDate),
     DB.tokenYear(ctx.device, ctx.year, filters),
-    DB.tokenBreakdown(ctx.device, ctx.range, filters, 'source'),
-    DB.tokenBreakdown(ctx.device, ctx.range, filters, 'model'),
+    DB.tokenBreakdown(ctx.device, ctx.tokenRange, filters, 'source', ctx.tokenDate),
+    DB.tokenBreakdown(ctx.device, ctx.tokenRange, filters, 'model', ctx.tokenDate),
     DB.tokenSources(ctx.device),
   ]);
   if (!isRenderCurrent(token)) return;
@@ -650,7 +923,7 @@ async function renderTokens(ctx, token) {
   empty.hidden = hasData;
   if (!hasData) {
     empty.textContent = '当前设备、时间范围或筛选条件下暂无 Token 记录；上方来源状态用于区分“未安装”和“尚无数据”。';
-    $('#tokenSub').textContent = `${RANGE_LABEL[ctx.range]} · 请求级本地用量 · 暂无匹配记录`;
+    $('#tokenSub').textContent = `${periodLabel(ctx.tokenRange, ctx.tokenDate)} · 请求级本地用量 · 暂无匹配记录`;
     return;
   }
 
@@ -668,7 +941,7 @@ async function renderTokens(ctx, token) {
       <strong title="${formatTokens(value)}">${formatTokens(value, true)}</strong>
       <small>${escapeHTML(detail)}</small>
     </div>`).join('');
-  $('#tokenSub').textContent = `${RANGE_LABEL[ctx.range]} · ${formatTokens(summary.totalTokens)} Tokens · ${summary.eventCount.toLocaleString('zh-CN')} 次请求`;
+  $('#tokenSub').textContent = `${periodLabel(ctx.tokenRange, ctx.tokenDate)} · ${formatTokens(summary.totalTokens)} Tokens · ${summary.eventCount.toLocaleString('zh-CN')} 次请求`;
 
   const yearlyTokens = year.reduce((sum, day) => sum + (day.tokens || 0), 0);
   const activeDays = year.filter(day => day.tokens > 0).length;
@@ -677,18 +950,26 @@ async function renderTokens(ctx, token) {
     valueKey: 'tokens',
     valueLabel: 'Tokens',
     formatValue: value => `${formatTokens(value)} Tokens`,
+    selectedDate: ctx.tokenDate,
+    onSelect: day => selectPeriod('token', 'daily', localISODate(day.date)),
   });
 
-  const maxTrend = Math.max(...trend.values, 0);
+  const maxTrend = Math.max(...(trend.series || []).flatMap(series => series.values), 0);
   const divisor = maxTrend >= 1e9 ? 1e9 : maxTrend >= 1e6 ? 1e6 : maxTrend >= 1e3 ? 1e3 : 1;
   const trendUnit = divisor === 1e9 ? ' B' : divisor === 1e6 ? ' M' : divisor === 1e3 ? ' K' : '';
-  $('#tokenTrendHint').textContent = { daily: '今日 24 小时', weekly: '近 7 天', total: '近 12 个月' }[ctx.range];
-  Charts.line($('#tokenTrend'), {
+  $('#tokenTrendHint').textContent = `${periodLabel(ctx.tokenRange, ctx.tokenDate)} · ${(trend.series || []).length} 个模型`;
+  Charts.multiline($('#tokenTrend'), {
     labels: trend.labels,
-    values: trend.values.map(value => +(value / divisor).toFixed(2)),
-    rawValues: trend.values,
+    series: (trend.series || []).map(series => ({
+      id: series.id,
+      label: series.id,
+      color: modelColor(series.id),
+      values: series.values.map(value => +(value / divisor).toFixed(2)),
+      rawValues: series.values,
+    })),
     valueFormatter: value => `${formatTokens(value)} Tokens`,
-    color: '#a259ff', unit: trendUnit, height: 180,
+    unit: trendUnit,
+    height: 190,
   });
   renderTokenRanks($('#tokenSourceRank'), sourceRows, value => TOKEN_SOURCE_NAME[value] || value);
   renderTokenRanks($('#tokenModelRank'), modelRows);
@@ -1000,6 +1281,7 @@ async function renderAll() {
 document.addEventListener('DOMContentLoaded', async () => {
   Charts.init();
   buildRangeTabs();
+  buildPeriodControls();
   buildTrendToggles();
   buildSidebar();
 

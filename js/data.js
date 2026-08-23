@@ -146,9 +146,32 @@ const MockDB = (() => {
 
   /* ---------- 查询辅助 ---------- */
   const selDevices = deviceId => deviceId === 'all' ? devices : devices.filter(d => d.id === deviceId);
+  const isoDay = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const parseDay = value => {
+    const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    if (!matched) return new Date(today);
+    return new Date(+matched[1], +matched[2] - 1, +matched[3]);
+  };
+  const indexOfDay = date => Math.round((new Date(date.getFullYear(), date.getMonth(), date.getDate()) - START) / DAY_MS);
+  function selectedDays(range, anchor) {
+    const selected = parseDay(anchor);
+    let start = selected, end = selected;
+    if (range === 'weekly') {
+      if (anchor) start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() - (selected.getDay() + 6) % 7);
+      else start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() - 6);
+      end = anchor ? new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6) : selected;
+    } else if (range === 'monthly') {
+      start = new Date(selected.getFullYear(), selected.getMonth(), 1);
+      end = new Date(selected.getFullYear(), selected.getMonth() + 1, 0);
+    }
+    const out = [];
+    for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) out.push(new Date(date));
+    return out;
+  }
 
   // 某日各设备各软件合计分钟
   function sumDay(deviceId, appIds, dayIdx) {
+    if (dayIdx < 0 || dayIdx >= DAYS) return 0;
     let s = 0;
     selDevices(deviceId).forEach(d => appIds.forEach(a => { s += usage[d.id][a][dayIdx]; }));
     return s;
@@ -177,18 +200,28 @@ const MockDB = (() => {
   }
 
   /* 总时长趋势：按 range 返回 {labels, values(小时)} */
-  function trendSeries(deviceId, appIds, range) {
+  function trendSeries(deviceId, appIds, range, anchor) {
     if (range === 'daily') {
       const labels = [], values = [];
-      for (let h = 0; h < 24; h++) { labels.push(h + ':00'); values.push(+(sumHour(deviceId, appIds, h) / 60).toFixed(2)); }
+      const selected = parseDay(anchor);
+      const isToday = isoDay(selected) === isoDay(today);
+      const total = sumDay(deviceId, appIds, indexOfDay(selected));
+      const weights = Array.from({ length: 24 }, (_, hour) => dayCurve(hour));
+      const weightTotal = weights.reduce((sum, value) => sum + value, 0);
+      for (let h = 0; h < 24; h++) {
+        labels.push(h + ':00');
+        const minutes = (!anchor || isToday) ? sumHour(deviceId, appIds, h) : total * weights[h] / weightTotal;
+        values.push(+(minutes / 60).toFixed(2));
+      }
       return { labels, values, unit: 'h' };
     }
-    if (range === 'weekly') {
+    if (range === 'weekly' || range === 'monthly') {
       const labels = [], values = [], wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-      for (let i = DAYS - 7; i < DAYS; i++) {
-        const d = dateOf(i);
-        labels.push(wd[d.getDay()] + ' ' + (d.getMonth() + 1) + '/' + d.getDate());
-        values.push(+(sumDay(deviceId, appIds, i) / 60).toFixed(2));
+      for (const d of selectedDays(range, anchor)) {
+        labels.push(range === 'weekly'
+          ? wd[d.getDay()] + ' ' + (d.getMonth() + 1) + '/' + d.getDate()
+          : (d.getMonth() + 1) + '/' + d.getDate());
+        values.push(+(sumDay(deviceId, appIds, indexOfDay(d)) / 60).toFixed(2));
       }
       return { labels, values, unit: 'h' };
     }
@@ -205,14 +238,17 @@ const MockDB = (() => {
   }
 
   /* 每个软件在指定范围的合计分钟（降序行数据） */
-  function appTotals(deviceId, appIds, range) {
+  function appTotals(deviceId, appIds, range, anchor) {
     const rows = apps.filter(a => appIds.includes(a.id)).map(a => {
       let minutes = 0;
       selDevices(deviceId).forEach(d => {
         if (range === 'daily') {
-          for (let h = 0; h < 24; h++) minutes += hourlyUsage[d.id][a.id][h];
-        } else if (range === 'weekly') {
-          for (let i = DAYS - 7; i < DAYS; i++) minutes += usage[d.id][a.id][i];
+          if (anchor) minutes += usage[d.id][a.id][indexOfDay(parseDay(anchor))] || 0;
+          else for (let h = 0; h < 24; h++) minutes += hourlyUsage[d.id][a.id][h];
+        } else if (range === 'weekly' || range === 'monthly') {
+          for (const selected of selectedDays(range, anchor)) {
+            minutes += usage[d.id][a.id][indexOfDay(selected)] || 0;
+          }
         } else {
           for (let i = 0; i < DAYS; i++) minutes += usage[d.id][a.id][i];
         }
@@ -294,6 +330,13 @@ const MockDB = (() => {
     devices, apps, metricDefs, DAYS, yearList, dateOf, today,
     yearSeries, trendSeries, appTotals, appWeekday,
     metricSeries, metricCurrent, rangeTotalMinutes,
+    updateDevice: (deviceId, changes) => {
+      const device = devices.find(row => row.id === deviceId);
+      if (!device) throw new Error('device_not_found');
+      if (changes.name) device.name = String(changes.name);
+      if (typeof changes.paused === 'boolean') device.paused = changes.paused;
+      return { ...device };
+    },
     allApps: async () => apps.map(a => ({ id: a.id, minutes: Math.round(a.base) })),
   };
 })();

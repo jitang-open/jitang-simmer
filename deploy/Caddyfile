@@ -1,0 +1,15 @@
+{$SIMMER_DOMAIN} {
+  encode zstd gzip
+
+  @collector path /api/ingest /api/ai-token-events
+  handle @collector {
+    reverse_proxy simmer:8788
+  }
+
+  handle {
+    basic_auth {
+      {$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
+    }
+    reverse_proxy simmer:8788
+  }
+}

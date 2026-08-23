@@ -7,7 +7,8 @@
  *  - APP_META 为内置进程映射表（CAP-02 第一版）
  * ============================================================ */
 const LiveDB = (() => {
-  const BASE = location.port === '8788' ? location.origin : 'http://localhost:8788';
+  // 由服务端（本机或腾讯云 HTTPS）托管时始终同源；仅 file:// 演示页回退本机端口。
+  const BASE = location.protocol === 'file:' ? 'http://localhost:8788' : location.origin;
 
   const APP_META = {
     'Code.exe':            { name: 'Visual Studio Code', icon: '🧩', color: '#3b82f6', category: '开发工具' },
@@ -39,15 +40,18 @@ const LiveDB = (() => {
     if (!r.ok) throw new Error('http ' + r.status);
     return r.json();
   }
-  const q = (device, appIds) =>
+  const q = (device, appIds, date) =>
     `device=${encodeURIComponent(device || 'all')}` +
-    (Array.isArray(appIds) ? `&apps=${encodeURIComponent(appIds.join(','))}` : '');
-  const tokenQ = (device, range, filters = {}) => {
+    (Array.isArray(appIds) ? `&apps=${encodeURIComponent(appIds.join(','))}` : '') +
+    (date ? `&date=${encodeURIComponent(date)}` : '');
+  const tokenQ = (device, range, filters = {}, date) => {
     let query = `device=${encodeURIComponent(device || 'all')}`;
     if (range) query += `&range=${encodeURIComponent(range)}`;
     if (filters.source) query += `&sources=${encodeURIComponent(filters.source)}`;
     if (filters.provider) query += `&providers=${encodeURIComponent(filters.provider)}`;
-    if (filters.model) query += `&models=${encodeURIComponent(filters.model)}`;
+    const models = Array.isArray(filters.models) ? filters.models : (filters.model ? [filters.model] : []);
+    if (models.length) query += `&models=${encodeURIComponent(models.join(','))}`;
+    if (date) query += `&date=${encodeURIComponent(date)}`;
     return query;
   };
 
@@ -66,7 +70,14 @@ const LiveDB = (() => {
       live: true,
       yearList,
       apps: totals.map(r => ({ id: r.id, ...meta(r.id) })),
-      devices: devicesRaw.map(d => ({ id: d.id, name: d.name, host: d.id, os: '' })),
+      devices: devicesRaw.map(d => ({
+        id: d.id,
+        name: d.name,
+        host: d.id,
+        os: '',
+        reportedName: d.reportedName || d.name,
+        paused: !!d.paused,
+      })),
       metricDefs: [],                                    // 硬件指标 M2 支持
       serverSettings: settingsRaw.settings,
       saveSettings: settings => j('/api/settings', {
@@ -74,13 +85,18 @@ const LiveDB = (() => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       }),
+      updateDevice: (deviceId, changes) => j(`/api/devices/${encodeURIComponent(deviceId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      }),
       yearSeries: (device, appIds, year) =>
         j(`/api/year?${q(device, appIds)}&year=${year}`)
           .then(rows => rows.map(r => ({ date: new Date(r.date), minutes: r.minutes }))),
-      trendSeries: (device, appIds, range2) =>
-        j(`/api/trend?${q(device, appIds)}&range=${range2}`),
-      appTotals: (device, appIds, range2) =>
-        j(`/api/app-totals?${q(device, appIds)}&range=${range2}`)
+      trendSeries: (device, appIds, range2, date) =>
+        j(`/api/trend?${q(device, appIds, date)}&range=${range2}`),
+      appTotals: (device, appIds, range2, date) =>
+        j(`/api/app-totals?${q(device, appIds, date)}&range=${range2}`)
           .then(rows => rows.map(r => ({ id: r.id, minutes: r.minutes, ...meta(r.id) }))
             .sort((a, b) => b.minutes - a.minutes)),
       appWeekday: (device, appId) =>
@@ -97,18 +113,18 @@ const LiveDB = (() => {
       },
       tokenDimensions: device =>
         j(`/api/ai-tokens/dimensions?device=${encodeURIComponent(device || 'all')}`),
-      tokenSummary: (device, range2, filters) =>
-        j(`/api/ai-tokens/summary?${tokenQ(device, range2, filters)}`),
-      tokenTrend: (device, range2, filters) =>
-        j(`/api/ai-tokens/trend?${tokenQ(device, range2, filters)}`),
+      tokenSummary: (device, range2, filters, date) =>
+        j(`/api/ai-tokens/summary?${tokenQ(device, range2, filters, date)}`),
+      tokenTrend: (device, range2, filters, date) =>
+        j(`/api/ai-tokens/trend?${tokenQ(device, range2, filters, date)}&groupBy=model`),
       tokenYear: (device, year, filters) =>
         j(`/api/ai-tokens/year?${tokenQ(device, null, filters)}&year=${year}`)
           .then(rows => rows.map(row => ({
             date: new Date(row.date + 'T00:00:00'),
             tokens: row.tokens,
           }))),
-      tokenBreakdown: (device, range2, filters, dimension) =>
-        j(`/api/ai-tokens/breakdown?${tokenQ(device, range2, filters)}&dimension=${encodeURIComponent(dimension)}`),
+      tokenBreakdown: (device, range2, filters, dimension, date) =>
+        j(`/api/ai-tokens/breakdown?${tokenQ(device, range2, filters, date)}&dimension=${encodeURIComponent(dimension)}`),
       tokenSources: device =>
         j(`/api/ai-tokens/sources?device=${encodeURIComponent(device || 'all')}`),
     };

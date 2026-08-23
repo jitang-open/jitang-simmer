@@ -2,6 +2,7 @@
  * Simmer Server · HTTP 入口
  *  - POST /api/ingest   采集端上报（Bearer token 鉴权，幂等）
  *  - GET  /api/devices  设备列表
+ *  - PATCH /api/devices/:id  修改设备显示名或暂停状态
  *  - GET  /api/year?device=&year=&apps=        年度逐日分钟数
  *  - GET  /api/trend?device=&range=&apps=      趋势（daily/weekly/total）
  *  - GET  /api/app-totals?device=&range=&apps= 软件时长合计
@@ -23,7 +24,13 @@ const tokenAgg = require('./token-aggregate');
 /* ---------- 配置（首启自动生成 token） ---------- */
 const CONFIG_PATH = process.env.SIMMER_CONFIG_PATH || path.join(__dirname, 'config.json');
 let config;
-if (fs.existsSync(CONFIG_PATH)) {
+if (process.env.SIMMER_TOKEN) {
+  config = {
+    token: process.env.SIMMER_TOKEN,
+    port: Number(process.env.SIMMER_PORT) || 8788,
+    host: process.env.SIMMER_HOST || '0.0.0.0',
+  };
+} else if (fs.existsSync(CONFIG_PATH)) {
   config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 } else {
   config = { token: crypto.randomBytes(24).toString('hex'), port: 8788 };
@@ -47,6 +54,12 @@ const insertMinute = db.prepare(`
 const insertBatch = db.transaction((deviceId, minutes) => {
   for (const m of minutes) insertMinute.run(deviceId, m.t, m.app);
 });
+const getDevicePaused = db.prepare('SELECT paused FROM devices WHERE device_id=?');
+
+function registerDevice(deviceId, deviceName, timestamp) {
+  upsertDevice.run({ id: deviceId, name: deviceName, now: timestamp });
+  return !!getDevicePaused.get(deviceId)?.paused;
+}
 
 function auth(req, res, next) {
   if ((req.headers.authorization || '') !== 'Bearer ' + config.token) {
@@ -64,7 +77,8 @@ app.post('/api/ingest', auth, (req, res) => {
   if (bad) return res.status(400).json({ error: 'bad_minute_row' });
 
   const nowIso = new Date().toISOString();
-  upsertDevice.run({ id: deviceId, name: deviceName, now: nowIso });
+  const paused = registerDevice(deviceId, deviceName, nowIso);
+  if (paused) return res.json({ ok: true, received: 0, skipped: minutes.length, paused: true });
   insertBatch(deviceId, minutes);
   res.json({ ok: true, received: minutes.length });
 });
@@ -139,8 +153,7 @@ const upsertSourceStatus = db.prepare(`
     state=excluded.state, detail_code=excluded.detail_code,
     checked_at=excluded.checked_at, parser_version=excluded.parser_version
 `);
-const storeTokenBatch = db.transaction((deviceId, deviceName, events, statuses, receivedAt) => {
-  upsertDevice.run({ id: deviceId, name: deviceName, now: receivedAt });
+const storeTokenBatch = db.transaction((deviceId, events, statuses, receivedAt) => {
   let inserted = 0;
   for (const event of events) inserted += insertTokenEvent.run({ deviceId, ...event, receivedAt }).changes;
   for (const status of statuses) upsertSourceStatus.run({ deviceId, ...status });
@@ -162,7 +175,17 @@ app.post('/api/ai-token-events', auth, (req, res) => {
   }
 
   const receivedAt = new Date().toISOString();
-  const inserted = storeTokenBatch(deviceId, deviceName, normalizedEvents, normalizedStatuses, receivedAt);
+  const paused = registerDevice(deviceId, deviceName, receivedAt);
+  if (paused) return res.json({
+    ok: true,
+    received: 0,
+    inserted: 0,
+    duplicates: 0,
+    statuses: 0,
+    skipped: normalizedEvents.length,
+    paused: true,
+  });
+  const inserted = storeTokenBatch(deviceId, normalizedEvents, normalizedStatuses, receivedAt);
   res.json({
     ok: true,
     received: normalizedEvents.length,
@@ -179,12 +202,40 @@ const csv = s => s === undefined
   : String(s).split(',').map(x => x.trim()).filter(Boolean);
 
 app.get('/api/devices', (req, res) => res.json(agg.devices()));
+app.patch('/api/devices/:id', (req, res) => {
+  const deviceId = String(req.params.id || '');
+  if (!db.prepare('SELECT 1 FROM devices WHERE device_id=?').get(deviceId)) {
+    return res.status(404).json({ error: 'device_not_found' });
+  }
+
+  const updates = [];
+  const params = [];
+  if (Object.hasOwn(req.body || {}, 'name')) {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    if (!name || name.length > 200) return res.status(400).json({ error: 'invalid_device_name' });
+    updates.push('custom_name=?');
+    params.push(name);
+  }
+  if (Object.hasOwn(req.body || {}, 'paused')) {
+    if (typeof req.body.paused !== 'boolean') return res.status(400).json({ error: 'invalid_paused_state' });
+    updates.push('paused=?');
+    params.push(req.body.paused ? 1 : 0);
+  }
+  if (!updates.length) return res.status(400).json({ error: 'no_device_changes' });
+  params.push(deviceId);
+  db.prepare(`UPDATE devices SET ${updates.join(', ')} WHERE device_id=?`).run(...params);
+  res.json(agg.devices().find(device => device.id === deviceId));
+});
 app.get('/api/year', (req, res) =>
   res.json(agg.yearSeries(req.query.device || 'all', csv(req.query.apps), parseInt(req.query.year, 10) || new Date().getFullYear())));
 app.get('/api/trend', (req, res) =>
-  res.json(agg.trendSeries(req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily')));
+  res.json(agg.trendSeries(
+    req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily', req.query.date
+  )));
 app.get('/api/app-totals', (req, res) =>
-  res.json(agg.appTotals(req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily')));
+  res.json(agg.appTotals(
+    req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily', req.query.date
+  )));
 app.get('/api/app-weekday', (req, res) =>
   res.json(agg.appWeekday(req.query.device || 'all', req.query.app || '')));
 app.get('/api/range', (req, res) => res.json(agg.rangeInfo()));
@@ -194,18 +245,24 @@ const tokenFilters = query => ({
   providers: csv(query.providers),
   models: csv(query.models),
 });
-const tokenRange = value => ['daily', 'weekly', 'total'].includes(value) ? value : 'daily';
+const tokenRange = value => ['daily', 'weekly', 'monthly', 'total'].includes(value) ? value : 'daily';
 app.get('/api/ai-tokens/summary', (req, res) =>
-  res.json(tokenAgg.summary(req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range))));
+  res.json(tokenAgg.summary(
+    req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.date
+  )));
 app.get('/api/ai-tokens/trend', (req, res) =>
-  res.json(tokenAgg.trend(req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range))));
+  res.json(tokenAgg.trend(
+    req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.date,
+    req.query.groupBy === 'model'
+  )));
 app.get('/api/ai-tokens/year', (req, res) =>
   res.json(tokenAgg.yearSeries(
     req.query.device || 'all', tokenFilters(req.query), parseInt(req.query.year, 10) || new Date().getFullYear()
   )));
 app.get('/api/ai-tokens/breakdown', (req, res) =>
   res.json(tokenAgg.breakdown(
-    req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.dimension || 'source'
+    req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.dimension || 'source',
+    req.query.date
   )));
 app.get('/api/ai-tokens/sources', (req, res) =>
   res.json(tokenAgg.sourceStatuses(req.query.device || 'all')));
@@ -283,7 +340,8 @@ app.use('/js', express.static(path.join(WEB_ROOT, 'js'), { index: false }));
 
 if (require.main === module) {
   const PORT = config.port || 8788;
-  app.listen(PORT, () => {
+  const HOST = config.host || '0.0.0.0';
+  app.listen(PORT, HOST, () => {
     console.log(`[simmer] 后端已启动：http://localhost:${PORT}`);
     console.log('[simmer] 前端预览（真数据）：http://localhost:' + PORT + '/index.html');
   });

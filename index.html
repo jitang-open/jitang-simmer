@@ -51,7 +51,7 @@
 
     <div class="side-foot">
       <span class="dot-live"></span> 数据采集运行中<br>
-      <span class="side-ver">v0.7.1 · Local Data</span>
+      <span class="side-ver">v0.8.0 · Local Data</span>
     </div>
   </aside>
 
@@ -97,7 +97,7 @@
       <div class="hm-legend">
         <span>Less</span>
         <i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><i class="lv5"></i><i class="lv6"></i><i class="lv7"></i><i class="lv8"></i><i class="lv9"></i>
-        <span>More</span>
+        <span>More · 6 小时封顶</span>
       </div>
       <div class="divider"></div>
       <div class="card-head slim trend-head">
@@ -118,7 +118,14 @@
             <h2>软件使用时长</h2>
             <p class="card-sub" id="appsSub"></p>
           </div>
-          <span class="hint">点击软件行展开更多图表</span>
+          <div class="period-control" id="usagePeriodControl">
+            <div class="period-tabs" data-period-tabs="usage">
+              <button data-period="daily" class="on">日</button>
+              <button data-period="weekly">周</button>
+              <button data-period="monthly">月</button>
+            </div>
+            <div class="device-select period-select" id="usageDatePicker" aria-label="选择软件统计日期"></div>
+          </div>
         </div>
         <div id="appBars"></div>
       </section>
@@ -147,13 +154,16 @@
         <div class="token-filters">
           <div class="token-filter"><span>来源</span><div class="device-select token-select" id="tokenSourceFilter"></div></div>
           <div class="token-filter"><span>Provider</span><div class="device-select token-select" id="tokenProviderFilter"></div></div>
-          <div class="token-filter"><span>模型</span><div class="device-select token-select" id="tokenModelFilter"></div></div>
+          <div class="token-filter"><span>模型</span><div class="device-select token-select token-multi-select" id="tokenModelFilter"></div></div>
           <div class="token-filter token-range-filter">
             <span>时间</span>
-            <div class="range-tabs token-range-tabs" id="tokenRangeTabs" data-range-tabs>
-              <button data-range="daily" class="on">每日</button>
-              <button data-range="weekly">每周</button>
-              <button data-range="total">累计</button>
+            <div class="token-period-control">
+              <div class="period-tabs token-range-tabs" id="tokenRangeTabs" data-period-tabs="token">
+                <button data-period="daily" class="on">日</button>
+                <button data-period="weekly">周</button>
+                <button data-period="monthly">月</button>
+              </div>
+              <div class="device-select period-select" id="tokenDatePicker" aria-label="选择 Token 统计日期"></div>
             </div>
           </div>
         </div>
@@ -173,7 +183,7 @@
         </div>
         <div class="token-panel token-panel-wide">
           <div class="token-panel-title trend-panel-title">
-            <div>Token 趋势 <span id="tokenTrendHint"></span></div>
+            <div>Token 多模型趋势 <span id="tokenTrendHint"></span></div>
             <button type="button" class="trend-toggle token-trend-toggle" data-trend-toggle="token" aria-expanded="false">展开趋势 <span class="caret">▼</span></button>
           </div>
           <div id="tokenTrend" class="trend-content" hidden></div>

@@ -13,7 +13,7 @@
 - 2026-08-22 20:19 真实首次导入：Codex 41 个文件、ZCode 1 个数据库，共接收 2,963 条请求级事件；同一批 500 条再次上报两次均为 `inserted=0 / duplicates=500`。
 - 当前验收限制：DSH 为 `not_found`，累计请求/Token/扫描文件均为 0，因此压缩会话与 DeepSeek V4 Flash 的真实总数仍需在 Harness 接通后对照；这不影响 Codex/ZCode 已完成的 M1.5 使用。
 - 2026-08-22 21:26 只读性能基准：全量 42 个 Codex 文件 + 1 个 ZCode 库为 515ms / CPU 469ms；48 小时增量 14 个 Codex 文件 + 1 个 ZCode 库为 250ms / CPU 219ms。DSH 目录不存在时只有有界发现检查，不做全盘扫描。
-- 自动验证：Node.js 22 后端/点阵测试 13/13（含本地来源消失后累计历史仍保留）、Rust sidecar 稳定哈希/互斥总数/时间转换测试 3/3、.NET Release 构建 0 警告/0 错误，真实页面 Playwright 渲染、统一筛选、进程滚动、清空确认、时间同步与趋势折叠通过。
+- 自动验证：Node.js 24 后端/点阵测试（含本地来源消失后累计历史仍保留）、Rust sidecar 稳定哈希/互斥总数/时间转换测试、.NET Release 构建与真实页面渲染均需通过。
 
 ## Summary
 

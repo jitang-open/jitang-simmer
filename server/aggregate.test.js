@@ -35,3 +35,21 @@ test('星期均值包含完整日期范围内的零使用日期', () => {
   assert.equal(result.labels[0], '周一');
   assert.equal(result.values[0], 5); // 两个周一中仅第一个使用 10 分钟
 });
+
+test('软件统计可按任意日、自然周和自然月查询', () => {
+  assert.deepEqual(
+    agg.appTotals('pc-1', undefined, 'daily', '2026-08-03').map(row => [row.id, row.minutes]),
+    [['Code.exe', 10]]
+  );
+  assert.deepEqual(
+    agg.appTotals('pc-1', undefined, 'weekly', '2026-08-05').map(row => [row.id, row.minutes]),
+    [['Code.exe', 10]]
+  );
+  assert.deepEqual(
+    agg.appTotals('pc-1', undefined, 'monthly', '2026-08-22').map(row => [row.id, row.minutes]),
+    [['Code.exe', 10], ['Other.exe', 1]]
+  );
+  const monthTrend = agg.trendSeries('pc-1', undefined, 'monthly', '2026-08-22');
+  assert.equal(monthTrend.labels.length, 31);
+  assert.equal(monthTrend.values[2], 0.17);
+});
