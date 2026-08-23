@@ -40,11 +40,13 @@ const LiveDB = (() => {
     if (!r.ok) throw new Error('http ' + r.status);
     return r.json();
   }
-  const q = (device, appIds, date) =>
+  const q = (device, appIds, date, startDate, endDate) =>
     `device=${encodeURIComponent(device || 'all')}` +
     (Array.isArray(appIds) ? `&apps=${encodeURIComponent(appIds.join(','))}` : '') +
-    (date ? `&date=${encodeURIComponent(date)}` : '');
-  const tokenQ = (device, range, filters = {}, date) => {
+    (date ? `&date=${encodeURIComponent(date)}` : '') +
+    (startDate ? `&startDate=${encodeURIComponent(startDate)}` : '') +
+    (endDate ? `&endDate=${encodeURIComponent(endDate)}` : '');
+  const tokenQ = (device, range, filters = {}, date, startDate, endDate) => {
     let query = `device=${encodeURIComponent(device || 'all')}`;
     if (range) query += `&range=${encodeURIComponent(range)}`;
     if (filters.source) query += `&sources=${encodeURIComponent(filters.source)}`;
@@ -52,6 +54,8 @@ const LiveDB = (() => {
     const models = Array.isArray(filters.models) ? filters.models : (filters.model ? [filters.model] : []);
     if (models.length) query += `&models=${encodeURIComponent(models.join(','))}`;
     if (date) query += `&date=${encodeURIComponent(date)}`;
+    if (startDate) query += `&startDate=${encodeURIComponent(startDate)}`;
+    if (endDate) query += `&endDate=${encodeURIComponent(endDate)}`;
     return query;
   };
 
@@ -93,10 +97,10 @@ const LiveDB = (() => {
       yearSeries: (device, appIds, year) =>
         j(`/api/year?${q(device, appIds)}&year=${year}`)
           .then(rows => rows.map(r => ({ date: new Date(r.date), minutes: r.minutes }))),
-      trendSeries: (device, appIds, range2, date) =>
-        j(`/api/trend?${q(device, appIds, date)}&range=${range2}`),
-      appTotals: (device, appIds, range2, date) =>
-        j(`/api/app-totals?${q(device, appIds, date)}&range=${range2}`)
+      trendSeries: (device, appIds, range2, date, startDate, endDate) =>
+        j(`/api/trend?${q(device, appIds, date, startDate, endDate)}&range=${range2}`),
+      appTotals: (device, appIds, range2, date, startDate, endDate) =>
+        j(`/api/app-totals?${q(device, appIds, date, startDate, endDate)}&range=${range2}`)
           .then(rows => rows.map(r => ({ id: r.id, minutes: r.minutes, ...meta(r.id) }))
             .sort((a, b) => b.minutes - a.minutes)),
       appWeekday: (device, appId) =>
@@ -113,18 +117,18 @@ const LiveDB = (() => {
       },
       tokenDimensions: device =>
         j(`/api/ai-tokens/dimensions?device=${encodeURIComponent(device || 'all')}`),
-      tokenSummary: (device, range2, filters, date) =>
-        j(`/api/ai-tokens/summary?${tokenQ(device, range2, filters, date)}`),
-      tokenTrend: (device, range2, filters, date) =>
-        j(`/api/ai-tokens/trend?${tokenQ(device, range2, filters, date)}&groupBy=model`),
+      tokenSummary: (device, range2, filters, date, startDate, endDate) =>
+        j(`/api/ai-tokens/summary?${tokenQ(device, range2, filters, date, startDate, endDate)}`),
+      tokenTrend: (device, range2, filters, date, startDate, endDate) =>
+        j(`/api/ai-tokens/trend?${tokenQ(device, range2, filters, date, startDate, endDate)}&groupBy=model`),
       tokenYear: (device, year, filters) =>
         j(`/api/ai-tokens/year?${tokenQ(device, null, filters)}&year=${year}`)
           .then(rows => rows.map(row => ({
             date: new Date(row.date + 'T00:00:00'),
             tokens: row.tokens,
           }))),
-      tokenBreakdown: (device, range2, filters, dimension, date) =>
-        j(`/api/ai-tokens/breakdown?${tokenQ(device, range2, filters, date)}&dimension=${encodeURIComponent(dimension)}`),
+      tokenBreakdown: (device, range2, filters, dimension, date, startDate, endDate) =>
+        j(`/api/ai-tokens/breakdown?${tokenQ(device, range2, filters, date, startDate, endDate)}&dimension=${encodeURIComponent(dimension)}`),
       tokenSources: device =>
         j(`/api/ai-tokens/sources?device=${encodeURIComponent(device || 'all')}`),
     };

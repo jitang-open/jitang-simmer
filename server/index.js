@@ -230,11 +230,13 @@ app.get('/api/year', (req, res) =>
   res.json(agg.yearSeries(req.query.device || 'all', csv(req.query.apps), parseInt(req.query.year, 10) || new Date().getFullYear())));
 app.get('/api/trend', (req, res) =>
   res.json(agg.trendSeries(
-    req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily', req.query.date
+    req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily', req.query.date,
+    req.query.startDate, req.query.endDate
   )));
 app.get('/api/app-totals', (req, res) =>
   res.json(agg.appTotals(
-    req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily', req.query.date
+    req.query.device || 'all', csv(req.query.apps), req.query.range || 'daily', req.query.date,
+    req.query.startDate, req.query.endDate
   )));
 app.get('/api/app-weekday', (req, res) =>
   res.json(agg.appWeekday(req.query.device || 'all', req.query.app || '')));
@@ -245,15 +247,16 @@ const tokenFilters = query => ({
   providers: csv(query.providers),
   models: csv(query.models),
 });
-const tokenRange = value => ['daily', 'weekly', 'monthly', 'total'].includes(value) ? value : 'daily';
+const tokenRange = value => ['daily', 'weekly', 'monthly', 'custom', 'total'].includes(value) ? value : 'daily';
 app.get('/api/ai-tokens/summary', (req, res) =>
   res.json(tokenAgg.summary(
-    req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.date
+    req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.date,
+    req.query.startDate, req.query.endDate
   )));
 app.get('/api/ai-tokens/trend', (req, res) =>
   res.json(tokenAgg.trend(
     req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.date,
-    req.query.groupBy === 'model'
+    req.query.groupBy === 'model', req.query.startDate, req.query.endDate
   )));
 app.get('/api/ai-tokens/year', (req, res) =>
   res.json(tokenAgg.yearSeries(
@@ -262,7 +265,7 @@ app.get('/api/ai-tokens/year', (req, res) =>
 app.get('/api/ai-tokens/breakdown', (req, res) =>
   res.json(tokenAgg.breakdown(
     req.query.device || 'all', tokenFilters(req.query), tokenRange(req.query.range), req.query.dimension || 'source',
-    req.query.date
+    req.query.date, req.query.startDate, req.query.endDate
   )));
 app.get('/api/ai-tokens/sources', (req, res) =>
   res.json(tokenAgg.sourceStatuses(req.query.device || 'all')));

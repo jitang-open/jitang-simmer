@@ -16,12 +16,26 @@ function parseDay(value, fallback = new Date()) {
   return parsed;
 }
 
+function parseExactDay(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(year, month - 1, day);
+  return parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day
+    ? parsed
+    : null;
+}
+
 function addDays(date, amount) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + amount);
 }
 
-function rangeBounds(range, anchor, reference = new Date()) {
+function rangeBounds(range, anchor, reference = new Date(), startValue, endValue) {
   const selected = parseDay(anchor, reference);
+  if (range === 'custom') {
+    const start = parseExactDay(startValue) || selected;
+    const end = parseExactDay(endValue) || selected;
+    return start <= end ? { start, end } : { start: end, end: start };
+  }
   if (range === 'daily') return { start: selected, end: selected };
   if (range === 'weekly') {
     if (!anchor) return { start: addDays(selected, -6), end: selected };
@@ -44,4 +58,4 @@ function eachDay(start, end) {
   return days;
 }
 
-module.exports = { addDays, dayStr, eachDay, parseDay, rangeBounds };
+module.exports = { addDays, dayStr, eachDay, parseDay, parseExactDay, rangeBounds };

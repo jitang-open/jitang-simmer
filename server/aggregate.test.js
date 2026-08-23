@@ -53,3 +53,22 @@ test('软件统计可按任意日、自然周和自然月查询', () => {
   assert.equal(monthTrend.labels.length, 31);
   assert.equal(monthTrend.values[2], 0.17);
 });
+
+test('软件统计支持任意起止日期，长范围趋势自动按月聚合', () => {
+  assert.deepEqual(
+    agg.appTotals('pc-1', undefined, 'custom', null, '2026-08-03', '2026-08-09')
+      .map(row => [row.id, row.minutes]),
+    [['Code.exe', 10]]
+  );
+  const weekTrend = agg.trendSeries(
+    'pc-1', undefined, 'custom', null, '2026-08-03', '2026-08-09'
+  );
+  assert.equal(weekTrend.labels.length, 7);
+  assert.equal(weekTrend.values.reduce((sum, value) => sum + value, 0), 0.17);
+
+  const longTrend = agg.trendSeries(
+    'pc-1', undefined, 'custom', null, '2026-07-01', '2026-09-30'
+  );
+  assert.deepEqual(longTrend.labels, ['2026/7', '2026/8', '2026/9']);
+  assert.deepEqual(longTrend.values, [0, 0.18, 0]);
+});

@@ -157,6 +157,18 @@ test('Token 汇总、筛选、分组、热力图和来源状态返回一致数�
   assert.equal(modelTrend.body.series.reduce(
     (sum, series) => sum + series.values.reduce((inner, value) => inner + value, 0), 0
   ), 325);
+
+  const custom = await request(
+    `/api/ai-tokens/summary?device=test-pc&range=custom&startDate=${today}&endDate=${today}`
+  );
+  assert.equal(custom.body.totalTokens, 325);
+  const customTrend = await request(
+    `/api/ai-tokens/trend?device=test-pc&range=custom&startDate=${today}&endDate=${today}&groupBy=model`
+  );
+  assert.equal(customTrend.body.labels.length, 1);
+  assert.equal(customTrend.body.series.reduce(
+    (sum, series) => sum + series.values.reduce((inner, value) => inner + value, 0), 0
+  ), 325);
 });
 
 test('本地来源消失后累计历史仍保留，并显示历史已保存', async () => {

@@ -75,7 +75,7 @@ function yearSeries(device, apps, year) {
 }
 
 /* ---------- 趋势：daily=某日24h / weekly=某周 / monthly=某月 / total=近12个月 ---------- */
-function trendSeries(device, apps, range, anchor) {
+function trendSeries(device, apps, range, anchor, startDate, endDate) {
   const n = now();
   if (range === 'daily') {
     const day = dayStr(rangeBounds('daily', anchor, n).start);
@@ -89,11 +89,29 @@ function trendSeries(device, apps, range, anchor) {
     for (let h = 0; h < 24; h++) { labels.push(h + ':00'); values.push(+( (map.get(h) || 0) / 60 ).toFixed(2)); }
     return { labels, values, unit: 'h' };
   }
-  if (range === 'weekly' || range === 'monthly') {
+  if (range === 'weekly' || range === 'monthly' || range === 'custom') {
     const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     const labels = [], values = [];
-    const bounds = rangeBounds(range, anchor, n);
-    for (const d of eachDay(bounds.start, bounds.end)) {
+    const bounds = rangeBounds(range, anchor, n, startDate, endDate);
+    const days = eachDay(bounds.start, bounds.end);
+    if (range === 'custom' && days.length > 62) {
+      const { sql, params } = scope(
+        device, apps, ' AND substr(ts,1,10)>=? AND substr(ts,1,10)<=?'
+      );
+      params.push(dayStr(bounds.start), dayStr(bounds.end));
+      const rows = db.prepare(
+        `SELECT substr(ts,1,7) AS bucket, COUNT(*) AS m FROM usage_minutes ${sql} GROUP BY bucket`
+      ).all(...params);
+      const map = new Map(rows.map(row => [row.bucket, row.m]));
+      for (let date = new Date(bounds.start.getFullYear(), bounds.start.getMonth(), 1);
+        date <= bounds.end; date = new Date(date.getFullYear(), date.getMonth() + 1, 1)) {
+        const key = `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
+        labels.push(`${date.getFullYear()}/${date.getMonth() + 1}`);
+        values.push(+((map.get(key) || 0) / 60).toFixed(2));
+      }
+      return { labels, values, unit: 'h' };
+    }
+    for (const d of days) {
       const day = dayStr(d);
       const { sql, params } = scope(device, apps, ` AND substr(ts,1,10)=?`);
       params.push(day);
@@ -120,8 +138,8 @@ function trendSeries(device, apps, range, anchor) {
 }
 
 /* ---------- 软件时长合计（降序） ---------- */
-function appTotals(device, apps, range, anchor) {
-  const bounds = rangeBounds(range, anchor, now());
+function appTotals(device, apps, range, anchor, startDate, endDate) {
+  const bounds = rangeBounds(range, anchor, now(), startDate, endDate);
   let dayFilter = '';
 
   let appFilter = '';

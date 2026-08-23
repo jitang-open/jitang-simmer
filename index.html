@@ -51,7 +51,7 @@
 
     <div class="side-foot">
       <span class="dot-live"></span> 数据采集运行中<br>
-      <span class="side-ver">v0.8.1 · Local Data</span>
+      <span class="side-ver">v0.8.2 · Local Data</span>
     </div>
   </aside>
 
@@ -97,7 +97,7 @@
       <div class="hm-legend">
         <span>Less</span>
         <i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><i class="lv5"></i><i class="lv6"></i><i class="lv7"></i><i class="lv8"></i><i class="lv9"></i>
-        <span>More · 6 小时封顶</span>
+        <span>More · 5 小时封顶</span>
       </div>
       <div class="divider"></div>
       <div class="card-head slim trend-head">
@@ -123,6 +123,7 @@
               <button data-period="daily" class="on">日</button>
               <button data-period="weekly">周</button>
               <button data-period="monthly">月</button>
+              <button data-period="custom">自定义</button>
             </div>
             <div class="device-select period-select" id="usageDatePicker" aria-label="选择软件统计日期"></div>
           </div>
@@ -162,6 +163,8 @@
                 <button data-period="daily" class="on">日</button>
                 <button data-period="weekly">周</button>
                 <button data-period="monthly">月</button>
+                <button data-period="custom">自定义</button>
+                <button data-period="total">累计</button>
               </div>
               <div class="device-select period-select" id="tokenDatePicker" aria-label="选择 Token 统计日期"></div>
             </div>
@@ -178,7 +181,7 @@
           <div class="hm-legend">
             <span>Less</span>
             <i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><i class="lv5"></i><i class="lv6"></i><i class="lv7"></i><i class="lv8"></i><i class="lv9"></i>
-            <span>More</span>
+            <span>More · 1 亿 Tokens 封顶</span>
           </div>
         </div>
         <div class="token-panel token-panel-wide">

@@ -9,10 +9,10 @@
 - 文件变化约 5 秒触发、15 分钟兜底、48 小时增量、每日全量、原子离线队列和批量重试均已接入；本机持久化已确认的稳定哈希，活跃日志复扫只上传新增事件；Token 模块失败不会中断软件时长采集。
 - 后端已实现请求级幂等表、来源状态表、Bearer 批量上报和 summary/trend/year/breakdown/sources/dimensions 查询接口。
 - `ai_token_events` 不设 TTL 或自动清理：本地日志、工具或扫描路径以后消失，只改变当前来源状态，不删除已上传历史；累计总数、请求数和排行查询全部 SQLite 历史，累计趋势仅以最近 12 个月作为可视化窗口。服务器有历史但本地来源当前不可用时，页面显示“历史已保存”。
-- 前端已实现分类概览、年度 P95 点阵、按需展开趋势、来源/模型排行，以及设备、来源、provider、model、每日/每周/累计筛选；三个 Token 筛选器使用统一自定义下拉，面板内时间按钮与顶栏双向同步；未安装或无数据使用来源状态明确区分。
+- 前端已实现分类概览、年度点阵、按需展开趋势、来源/模型排行，以及设备、来源、provider、model、日/周/月/任意起止日期/累计筛选；累计读取全部 SQLite 历史，自定义长范围趋势按月聚合，年度点阵最高按 1 亿 Tokens 顶格；未安装或无数据使用来源状态明确区分。
 - 2026-08-22 20:19 真实首次导入：Codex 41 个文件、ZCode 1 个数据库，共接收 2,963 条请求级事件；同一批 500 条再次上报两次均为 `inserted=0 / duplicates=500`。
 - 2026-08-23 真实验收：`npx @deepseek-ai/dsh` 已被识别为 `ready/data_and_app`；WorkBuddy 4 个项目 JSONL 在约 1.2 秒内解析 166 次请求、12,436,438 Tokens，模型含 `deepseek-v4-flash`、`kimi-k3-1` 与 `glm-5.2`。紧接着的增量扫描上传 0 条，累计不重复。
-- 自动验证：Node 端 16 项测试、Rust sidecar 4 项测试、.NET Release/单文件构建与真实 API 链路均通过；SQLite 迁移前已自动备份，旧事件完整保留。
+- 自动验证：Node 端 17 项测试、Rust sidecar 4 项测试、.NET Release/单文件构建与真实 API 链路均通过；SQLite 迁移前已自动备份，旧事件完整保留。
 
 ## Summary
 
@@ -59,6 +59,7 @@
 - 前端增加“AI Tokens”：
   - Token 分类概览、趋势、年度 P95 热力图、来源排行和模型排行。
   - 设备、来源、provider、model、时间范围筛选。
+  - 日/周/月、任意起止日期与累计全部历史；年度点阵最高按 1 亿 Tokens 顶格。
   - 显示每个设备上的来源状态和本地发现结果摘要。
   - `deepseek-v4-flash` 按实际模型展示，不冒充 OpenCode Go 套餐配额。
 - 参考 Token Monitor 的边界：WorkBuddy 只监听 `~/.workbuddy/projects`，避免整个应用目录的配置、认证和数据库变化制造无效扫描；Simmer 仍保留自己的请求级 SQLite 永久累计。[Token Monitor 采集器](https://github.com/Javis603/token-monitor/blob/5ecc60535168f919d8ce5d6d1aaa14c87d11f52b/src/shared/collector.js)

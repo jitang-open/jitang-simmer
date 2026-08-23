@@ -30,8 +30,8 @@ function normalizeFilter(values) {
   return [...new Set(values.map(value => String(value).trim()).filter(Boolean))];
 }
 
-function rangeSql(range, anchor, reference = now()) {
-  const bounds = rangeBounds(range, anchor, reference);
+function rangeSql(range, anchor, reference = now(), startDate, endDate) {
+  const bounds = rangeBounds(range, anchor, reference, startDate, endDate);
   if (bounds) return {
     sql: " AND date(occurred_at, 'localtime')>=? AND date(occurred_at, 'localtime')<=?",
     params: [dayStr(bounds.start), dayStr(bounds.end)],
@@ -39,7 +39,7 @@ function rangeSql(range, anchor, reference = now()) {
   return { sql: '', params: [] };
 }
 
-function scope(device, filters = {}, range = 'total', extraSql = '', anchor) {
+function scope(device, filters = {}, range = 'total', extraSql = '', anchor, startDate, endDate) {
   const ids = deviceIds(device);
   const params = [];
   let sql = ' WHERE 1=1';
@@ -62,7 +62,7 @@ function scope(device, filters = {}, range = 'total', extraSql = '', anchor) {
     params.push(...values);
   }
 
-  const rangePart = rangeSql(range, anchor);
+  const rangePart = rangeSql(range, anchor, now(), startDate, endDate);
   sql += rangePart.sql + extraSql;
   params.push(...rangePart.params);
   return { sql, params };
@@ -80,14 +80,14 @@ function rowToSummary(row = {}) {
   };
 }
 
-function summary(device, filters, range, anchor) {
-  const { sql, params } = scope(device, filters, range, '', anchor);
+function summary(device, filters, range, anchor, startDate, endDate) {
+  const { sql, params } = scope(device, filters, range, '', anchor, startDate, endDate);
   const sums = TOKEN_COLUMNS.map(column => `COALESCE(SUM(${column}), 0) AS ${column}`).join(', ');
   const row = db.prepare(`SELECT ${sums}, COUNT(*) AS event_count FROM ai_token_events ${sql}`).get(...params);
   return rowToSummary(row);
 }
 
-function trend(device, filters, range, anchor, groupByModel = false) {
+function trend(device, filters, range, anchor, groupByModel = false, startDate, endDate) {
   const reference = now();
   const labels = [];
   const keys = [];
@@ -99,15 +99,25 @@ function trend(device, filters, range, anchor, groupByModel = false) {
       keys.push(pad(hour));
       labels.push(`${hour}:00`);
     }
-  } else if (range === 'weekly' || range === 'monthly') {
-    keySql = "date(occurred_at, 'localtime')";
+  } else if (range === 'weekly' || range === 'monthly' || range === 'custom') {
     const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    const bounds = rangeBounds(range, anchor, reference);
-    for (const date of eachDay(bounds.start, bounds.end)) {
-      keys.push(dayStr(date));
-      labels.push(range === 'weekly'
-        ? `${weekdays[date.getDay()]} ${date.getMonth() + 1}/${date.getDate()}`
-        : `${date.getMonth() + 1}/${date.getDate()}`);
+    const bounds = rangeBounds(range, anchor, reference, startDate, endDate);
+    const days = eachDay(bounds.start, bounds.end);
+    if (range === 'custom' && days.length > 62) {
+      keySql = "strftime('%Y-%m', occurred_at, 'localtime')";
+      for (let date = new Date(bounds.start.getFullYear(), bounds.start.getMonth(), 1);
+        date <= bounds.end; date = new Date(date.getFullYear(), date.getMonth() + 1, 1)) {
+        keys.push(`${date.getFullYear()}-${pad(date.getMonth() + 1)}`);
+        labels.push(`${date.getFullYear()}/${date.getMonth() + 1}`);
+      }
+    } else {
+      keySql = "date(occurred_at, 'localtime')";
+      for (const date of days) {
+        keys.push(dayStr(date));
+        labels.push(range === 'weekly'
+          ? `${weekdays[date.getDay()]} ${date.getMonth() + 1}/${date.getDate()}`
+          : `${date.getMonth() + 1}/${date.getDate()}`);
+      }
     }
   } else {
     keySql = "strftime('%Y-%m', occurred_at, 'localtime')";
@@ -119,7 +129,8 @@ function trend(device, filters, range, anchor, groupByModel = false) {
   }
 
   const { sql, params } = scope(
-    device, filters, range, ` AND ${keySql} IN (${keys.map(() => '?').join(',')})`, anchor
+    device, filters, range, ` AND ${keySql} IN (${keys.map(() => '?').join(',')})`,
+    anchor, startDate, endDate
   );
   params.push(...keys);
   if (groupByModel) {
@@ -171,10 +182,10 @@ function yearSeries(device, filters, year) {
   return result;
 }
 
-function breakdown(device, filters, range, dimension, anchor) {
+function breakdown(device, filters, range, dimension, anchor, startDate, endDate) {
   const columns = { source: 'source', provider: 'provider', model: 'model' };
   const column = columns[dimension] || columns.source;
-  const { sql, params } = scope(device, filters, range, '', anchor);
+  const { sql, params } = scope(device, filters, range, '', anchor, startDate, endDate);
   return db.prepare(
     `SELECT CASE WHEN ${column}='' THEN 'unknown' ELSE ${column} END AS id,
             SUM(total_tokens) AS tokens, COUNT(*) AS event_count

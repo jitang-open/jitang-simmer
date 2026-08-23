@@ -51,10 +51,10 @@ test('AI Token 年度点阵复用 P95 色阶但读取独立 tokens 字段', () =
   assert.equal(scale.level(null), 0);
 });
 
-test('软件时长点阵可在 P95 之上再按六小时硬封顶', () => {
-  const scale = buildHeatmapScale(rows([60, 120, 240, 480, 1200]), 'minutes', 360);
-  assert.equal(scale.capMinutes, 360);
-  assert.equal(scale.level(360), 9);
+test('软件时长点阵可在 P95 之上再按五小时硬封顶', () => {
+  const scale = buildHeatmapScale(rows([60, 120, 240, 480, 1200]), 'minutes', 300);
+  assert.equal(scale.capMinutes, 300);
+  assert.equal(scale.level(300), 9);
   assert.equal(scale.level(1200), 9);
   assert.ok(scale.level(120) > 1);
 });

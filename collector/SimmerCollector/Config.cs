@@ -13,6 +13,8 @@ internal class Config
     public int IdleThresholdMinutes { get; set; } = 5;
     /// <summary>上报间隔（分钟）</summary>
     public int UploadIntervalMinutes { get; set; } = 5;
+    /// <summary>登录当前 Windows 用户后自动启动采集器（CAP-04）。</summary>
+    public bool StartWithWindows { get; set; }
     /// <summary>是否启用本地 AI Token 来源扫描。</summary>
     public bool EnableTokenStatistics { get; set; } = true;
     /// <summary>Token 兜底扫描间隔；文件变化仍会在约 5 秒后触发。</summary>

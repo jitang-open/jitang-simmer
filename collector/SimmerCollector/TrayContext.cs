@@ -27,6 +27,8 @@ internal class TrayContext : ApplicationContext
     public TrayContext()
     {
         _cfg = Config.Load();
+        try { AutoStartManager.Apply(_cfg.StartWithWindows); }
+        catch (Exception ex) { Log.Write("开机自启状态同步失败: " + ex.Message); }
         _store = new LocalStore();
         _tokenScanner = new TokenScannerManager(_cfg);
         _ = _uiSync.Handle;                            // 立即创建句柄，使 BeginInvoke 可用
@@ -221,6 +223,7 @@ internal class SettingsForm : Form
     private readonly TextBox _txtZCode = new() { Top = 210, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
     private readonly TextBox _txtDsh = new() { Top = 240, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
     private readonly TextBox _txtWorkBuddy = new() { Top = 270, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
+    private readonly CheckBox _chkAutoStart = new() { Top = 303, Left = 110, Width = 280, Text = "登录 Windows 后自动启动采集器" };
 
     public SettingsForm(Config cfg)
     {
@@ -229,7 +232,7 @@ internal class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(420, 355);
+        ClientSize = new Size(420, 390);
 
         void Label(string text, int top) =>
             Controls.Add(new Label { Text = text, AutoSize = true, Top = top + 3, Left = 15 });
@@ -247,16 +250,26 @@ internal class SettingsForm : Form
         _txtZCode.Text = cfg.ZCodeHome;
         _txtDsh.Text = cfg.DshHome;
         _txtWorkBuddy.Text = cfg.WorkBuddyHome;
-        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh, _txtWorkBuddy]);
+        _chkAutoStart.Checked = cfg.StartWithWindows && AutoStartManager.IsRegistered();
+        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh, _txtWorkBuddy, _chkAutoStart]);
         AddBrowseButton(_txtCodex, 180);
         AddBrowseButton(_txtZCode, 210);
         AddBrowseButton(_txtDsh, 240);
         AddBrowseButton(_txtWorkBuddy, 270);
 
-        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 310, Left = 230, Width = 85 };
-        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 310, Left = 325, Width = 80 };
+        var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Top = 345, Left = 230, Width = 85 };
+        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Top = 345, Left = 325, Width = 80 };
         ok.Click += (s, e) =>
         {
+            try { AutoStartManager.Apply(_chkAutoStart.Checked); }
+            catch (Exception ex)
+            {
+                Log.Write("开机自启设置失败: " + ex.Message);
+                MessageBox.Show(this, "无法更新 Windows 开机自启设置，请检查当前用户权限。", "Simmer 采集器",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogResult = DialogResult.None;
+                return;
+            }
             cfg.ServerUrl = _txtUrl.Text.Trim();
             cfg.Token = _txtToken.Text.Trim();
             cfg.DeviceName = _txtName.Text.Trim();
@@ -266,6 +279,7 @@ internal class SettingsForm : Form
             cfg.ZCodeHome = _txtZCode.Text.Trim();
             cfg.DshHome = _txtDsh.Text.Trim();
             cfg.WorkBuddyHome = _txtWorkBuddy.Text.Trim();
+            cfg.StartWithWindows = _chkAutoStart.Checked;
         };
         Controls.Add(ok);
         Controls.Add(cancel);

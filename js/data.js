@@ -153,10 +153,14 @@ const MockDB = (() => {
     return new Date(+matched[1], +matched[2] - 1, +matched[3]);
   };
   const indexOfDay = date => Math.round((new Date(date.getFullYear(), date.getMonth(), date.getDate()) - START) / DAY_MS);
-  function selectedDays(range, anchor) {
+  function selectedDays(range, anchor, startValue, endValue) {
     const selected = parseDay(anchor);
     let start = selected, end = selected;
-    if (range === 'weekly') {
+    if (range === 'custom') {
+      start = parseDay(startValue);
+      end = parseDay(endValue);
+      if (start > end) [start, end] = [end, start];
+    } else if (range === 'weekly') {
       if (anchor) start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() - (selected.getDay() + 6) % 7);
       else start = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() - 6);
       end = anchor ? new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6) : selected;
@@ -200,7 +204,7 @@ const MockDB = (() => {
   }
 
   /* 总时长趋势：按 range 返回 {labels, values(小时)} */
-  function trendSeries(deviceId, appIds, range, anchor) {
+  function trendSeries(deviceId, appIds, range, anchor, startDate, endDate) {
     if (range === 'daily') {
       const labels = [], values = [];
       const selected = parseDay(anchor);
@@ -215,9 +219,25 @@ const MockDB = (() => {
       }
       return { labels, values, unit: 'h' };
     }
-    if (range === 'weekly' || range === 'monthly') {
+    if (range === 'weekly' || range === 'monthly' || range === 'custom') {
       const labels = [], values = [], wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-      for (const d of selectedDays(range, anchor)) {
+      const days = selectedDays(range, anchor, startDate, endDate);
+      if (range === 'custom' && days.length > 62) {
+        const months = new Map();
+        for (const d of days) {
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          months.set(key, (months.get(key) || 0) + sumDay(deviceId, appIds, indexOfDay(d)));
+        }
+        return {
+          labels: [...months].map(([key]) => {
+            const [year, month] = key.split('-');
+            return `${year}/${+month}`;
+          }),
+          values: [...months.values()].map(minutes => +(minutes / 60).toFixed(2)),
+          unit: 'h',
+        };
+      }
+      for (const d of days) {
         labels.push(range === 'weekly'
           ? wd[d.getDay()] + ' ' + (d.getMonth() + 1) + '/' + d.getDate()
           : (d.getMonth() + 1) + '/' + d.getDate());
@@ -238,15 +258,15 @@ const MockDB = (() => {
   }
 
   /* 每个软件在指定范围的合计分钟（降序行数据） */
-  function appTotals(deviceId, appIds, range, anchor) {
+  function appTotals(deviceId, appIds, range, anchor, startDate, endDate) {
     const rows = apps.filter(a => appIds.includes(a.id)).map(a => {
       let minutes = 0;
       selDevices(deviceId).forEach(d => {
         if (range === 'daily') {
           if (anchor) minutes += usage[d.id][a.id][indexOfDay(parseDay(anchor))] || 0;
           else for (let h = 0; h < 24; h++) minutes += hourlyUsage[d.id][a.id][h];
-        } else if (range === 'weekly' || range === 'monthly') {
-          for (const selected of selectedDays(range, anchor)) {
+        } else if (range === 'weekly' || range === 'monthly' || range === 'custom') {
+          for (const selected of selectedDays(range, anchor, startDate, endDate)) {
             minutes += usage[d.id][a.id][indexOfDay(selected)] || 0;
           }
         } else {
