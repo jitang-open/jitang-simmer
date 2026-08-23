@@ -83,7 +83,7 @@ const TOKEN_SOURCE_NAME = { codex: 'Codex', zcode: 'ZCode', dsh: 'DeepSeek Harne
 const TOKEN_STATUS = {
   ready: ['可用', 'ok'],
   installed_no_data: ['已安装，暂无数据', 'muted'],
-  history_only: ['仅历史数据', 'warn'],
+  history_only: ['历史已保存', 'warn'],
   not_found: ['未找到', 'muted'],
   incompatible: ['解析器不可用', 'bad'],
   error: ['扫描失败', 'bad'],

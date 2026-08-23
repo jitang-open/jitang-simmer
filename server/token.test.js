@@ -135,3 +135,34 @@ test('Token 汇总、筛选、分组、热力图和来源状态返回一致数�
   assert.equal(sourceRows.body.length, 3);
   assert.equal(sourceRows.body.find(row => row.source === 'dsh').state, 'not_found');
 });
+
+test('本地来源消失后累计历史仍保留，并显示历史已保存', async () => {
+  const missingPayload = {
+    deviceId: 'test-pc',
+    deviceName: 'Test PC',
+    events: [],
+    statuses: [
+      { ...statuses[0], state: 'not_found', detailCode: 'no_data_or_app' },
+      { ...statuses[1], state: 'installed_no_data', detailCode: 'app_only' },
+      statuses[2],
+    ],
+  };
+  const update = await request('/api/ai-token-events', {
+    method: 'POST', body: missingPayload, authorized: true,
+  });
+  assert.deepEqual(update.body, { ok: true, received: 0, inserted: 0, duplicates: 0, statuses: 3 });
+
+  const total = await request('/api/ai-tokens/summary?device=test-pc&range=total');
+  assert.equal(total.body.totalTokens, 225);
+  assert.equal(total.body.eventCount, 2);
+
+  const sourceRows = await request('/api/ai-tokens/sources?device=test-pc');
+  const codex = sourceRows.body.find(row => row.source === 'codex');
+  const zcode = sourceRows.body.find(row => row.source === 'zcode');
+  const dsh = sourceRows.body.find(row => row.source === 'dsh');
+  assert.equal(codex.state, 'history_only');
+  assert.equal(codex.detailCode, 'server_history_only');
+  assert.equal(zcode.state, 'history_only');
+  assert.equal(zcode.detailCode, 'server_history_only');
+  assert.equal(dsh.state, 'not_found');
+});

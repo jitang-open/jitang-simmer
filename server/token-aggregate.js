@@ -165,6 +165,19 @@ function breakdown(device, filters, range, dimension) {
   }));
 }
 
+function markStoredHistory(rows, ids) {
+  if (!ids.length || !rows.length) return rows;
+  const history = new Set(db.prepare(
+    `SELECT DISTINCT device_id, source FROM ai_token_events
+     WHERE device_id IN (${ids.map(() => '?').join(',')})`
+  ).all(...ids).map(row => `${row.device_id}\u0000${row.source}`));
+  return rows.map(row => {
+    const hasHistory = history.has(`${row.deviceId}\u0000${row.source}`);
+    if (!hasHistory || !['not_found', 'installed_no_data'].includes(row.state)) return row;
+    return { ...row, state: 'history_only', detailCode: 'server_history_only' };
+  });
+}
+
 function sourceStatuses(device) {
   const ids = deviceIds(device);
   if (!ids.length) return [];
@@ -175,17 +188,17 @@ function sourceStatuses(device) {
      WHERE device_id IN (${ids.map(() => '?').join(',')})
      ORDER BY device_id, source`
   ).all(...ids);
-  if (device === 'all' || !device) return rows;
+  if (device === 'all' || !device) return markStoredHistory(rows, ids);
 
   const bySource = new Map(rows.map(row => [row.source, row]));
-  return SOURCES.map(source => bySource.get(source) || {
+  return markStoredHistory(SOURCES.map(source => bySource.get(source) || {
     deviceId: device,
     source,
     state: 'not_found',
     detailCode: 'not_scanned',
     checkedAt: null,
     parserVersion: '',
-  });
+  }), ids);
 }
 
 function dimensions(device) {
