@@ -86,6 +86,7 @@ const state = {
   tokenDate: localISODate(),                            // Token 卡片所选锚点日期
   tokenStartDate: localISODate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
   tokenEndDate: localISODate(),
+  deviceSyncOpen: false,                                // 多设备同步详情默认收起
   usageTrendOpen: false,                                // 总时长趋势默认收起
   tokenTrendOpen: false,                                // Token 趋势默认收起
 };
@@ -418,7 +419,14 @@ function mountPeriodPicker(scope) {
   const selectedDate = parseLocalDate(state[`${scope}Date`]);
   const startDate = state[`${scope}StartDate`];
   const endDate = state[`${scope}EndDate`];
+  let customStart = isValidLocalDate(startDate) ? startDate : localISODate();
+  let customEnd = isValidLocalDate(endDate) ? endDate : localISODate();
+  let customEndpoint = 'start';
   let viewDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+  if (range === 'custom' || range === 'total') {
+    const initial = parseLocalDate(customStart);
+    viewDate = new Date(initial.getFullYear(), initial.getMonth(), 1);
+  }
   wrap.classList.remove('open');
   wrap.innerHTML = `
     <button type="button" class="ds-btn period-select-btn" aria-haspopup="dialog" aria-expanded="false">
@@ -431,27 +439,82 @@ function mountPeriodPicker(scope) {
   const renderPanel = () => {
     const today = parseLocalDate(localISODate());
     if (range === 'custom' || range === 'total') {
+      const start = parseLocalDate(customStart);
+      const end = parseLocalDate(customEnd);
+      const rangeStart = start <= end ? start : end;
+      const rangeEnd = start <= end ? end : start;
+      const first = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+      const gridStart = new Date(first.getFullYear(), first.getMonth(), first.getDate() - (first.getDay() + 6) % 7);
+      const displayDate = value => {
+        const date = parseLocalDate(value);
+        return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+      };
       panel.innerHTML = `
         <div class="calendar-custom">
-          <strong>${range === 'total' ? '从累计切换为自定义范围' : '自定义起止日期'}</strong>
-          <label><span>开始日期</span><input type="date" data-range-start value="${escapeHTML(startDate)}" max="${localISODate()}"></label>
-          <label><span>结束日期</span><input type="date" data-range-end value="${escapeHTML(endDate)}" max="${localISODate()}"></label>
+          <strong>${range === 'total' ? '从累计切换为自定义范围' : '选择日期区间'}</strong>
+          <div class="calendar-range-fields">
+            <button type="button" data-custom-endpoint="start" class="${customEndpoint === 'start' ? 'active' : ''}"><small>开始日期</small><span>${escapeHTML(displayDate(customStart))}</span></button>
+            <i>→</i>
+            <button type="button" data-custom-endpoint="end" class="${customEndpoint === 'end' ? 'active' : ''}"><small>结束日期</small><span>${escapeHTML(displayDate(customEnd))}</span></button>
+          </div>
+          <div class="calendar-head">
+            <button type="button" data-calendar-nav="-1" aria-label="上个月">‹</button>
+            <strong>${viewDate.getFullYear()} 年 ${viewDate.getMonth() + 1} 月</strong>
+            <button type="button" data-calendar-nav="1" aria-label="下个月">›</button>
+          </div>
+          <div class="calendar-weekdays">${['一','二','三','四','五','六','日'].map(day => `<span>${day}</span>`).join('')}</div>
+          <div class="calendar-days">${Array.from({ length: 42 }, (_, index) => {
+            const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index);
+            const value = localISODate(date);
+            const outside = date.getMonth() !== viewDate.getMonth();
+            const future = date > today;
+            const inRange = date >= rangeStart && date <= rangeEnd;
+            const edge = value === customStart || value === customEnd;
+            return `<button type="button" data-custom-date="${value}" class="${outside ? 'outside ' : ''}${inRange ? 'in-range ' : ''}${edge ? 'sel' : ''}" ${future ? 'disabled' : ''}>${date.getDate()}</button>`;
+          }).join('')}</div>
           <p class="calendar-error" role="alert" hidden></p>
           <button type="button" class="calendar-apply">应用范围</button>
         </div>`;
+      panel.querySelectorAll('[data-custom-endpoint]').forEach(endpoint => endpoint.addEventListener('click', event => {
+        event.stopPropagation();
+        customEndpoint = endpoint.dataset.customEndpoint;
+        const selected = parseLocalDate(customEndpoint === 'start' ? customStart : customEnd);
+        viewDate = new Date(selected.getFullYear(), selected.getMonth(), 1);
+        renderPanel();
+      }));
+      panel.querySelectorAll('[data-calendar-nav]').forEach(nav => nav.addEventListener('click', event => {
+        event.stopPropagation();
+        viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + Number(nav.dataset.calendarNav), 1);
+        renderPanel();
+      }));
+      panel.querySelectorAll('[data-custom-date]').forEach(day => day.addEventListener('click', event => {
+        event.stopPropagation();
+        if (day.disabled) return;
+        const chosen = day.dataset.customDate;
+        if (customEndpoint === 'start') {
+          customStart = chosen;
+          if (parseLocalDate(customStart) > parseLocalDate(customEnd)) customEnd = chosen;
+          customEndpoint = 'end';
+        } else {
+          customEnd = chosen;
+          if (parseLocalDate(customEnd) < parseLocalDate(customStart)) {
+            [customStart, customEnd] = [customEnd, customStart];
+          }
+          customEndpoint = 'start';
+        }
+        renderPanel();
+      }));
       panel.querySelector('.calendar-apply').addEventListener('click', event => {
         event.stopPropagation();
-        const from = panel.querySelector('[data-range-start]').value;
-        const to = panel.querySelector('[data-range-end]').value;
         const error = panel.querySelector('.calendar-error');
-        if (!isValidLocalDate(from) || !isValidLocalDate(to)) {
+        if (!isValidLocalDate(customStart) || !isValidLocalDate(customEnd)) {
           error.textContent = '请选择有效的开始和结束日期';
           error.hidden = false;
           return;
         }
         wrap.classList.remove('open');
         button.setAttribute('aria-expanded', 'false');
-        selectCustomPeriod(scope, from, to);
+        selectCustomPeriod(scope, customStart, customEnd);
       });
       return;
     }
@@ -564,8 +627,18 @@ function buildPeriodControls() {
 /* ---------------- 侧边栏：滚动高亮（scroll-spy）+ 移动端抽屉 ---------------- */
 
 const TREND_CONTROLS = {
-  usage: { stateKey: 'usageTrendOpen', target: '#trendWrap' },
-  token: { stateKey: 'tokenTrendOpen', target: '#tokenTrend' },
+  deviceSync: {
+    stateKey: 'deviceSyncOpen', target: '#deviceSyncBody',
+    closedLabel: '展开详情', openLabel: '收起详情',
+  },
+  usage: {
+    stateKey: 'usageTrendOpen', target: '#trendWrap',
+    closedLabel: '展开趋势', openLabel: '收起趋势',
+  },
+  token: {
+    stateKey: 'tokenTrendOpen', target: '#tokenTrend',
+    closedLabel: '展开趋势', openLabel: '收起趋势',
+  },
 };
 
 function syncTrendToggles() {
@@ -576,7 +649,7 @@ function syncTrendToggles() {
     const content = $(control.target);
     if (content) content.hidden = !open;
     button.setAttribute('aria-expanded', open ? 'true' : 'false');
-    button.innerHTML = `${open ? '收起趋势' : '展开趋势'} <span class="caret">▼</span>`;
+    button.innerHTML = `${open ? control.openLabel : control.closedLabel} <span class="caret">▼</span>`;
   });
 }
 
@@ -1471,6 +1544,16 @@ async function renderAll() {
   ]);
 }
 
+const HARDWARE_REFRESH_MS = 10 * 60 * 1000;
+async function refreshHardwarePanels() {
+  const token = ++renderGeneration;
+  const ctx = snapshotRenderState();
+  await Promise.all([
+    renderOverview(ctx, token),
+    renderHardware(ctx, token),
+  ]);
+}
+
 /* ---------------- 启动 ---------------- */
 document.addEventListener('DOMContentLoaded', async () => {
   Charts.init();
@@ -1564,6 +1647,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     refreshDeviceState({ renderCharts: true }).catch(error =>
       console.error('[simmer] 自动刷新设备同步状态失败：', error));
   }, 30_000);
+  window.setInterval(() => {
+    refreshHardwarePanels().catch(error =>
+      console.error('[simmer] 硬件面板自动刷新失败：', error));
+  }, HARDWARE_REFRESH_MS);
 
   $('#wlAdd').addEventListener('click', () => openAppForm(null));
   $('#wlAll').addEventListener('click', () => {

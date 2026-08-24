@@ -91,10 +91,15 @@
           <h2>多设备同步</h2>
           <p class="card-sub" id="deviceSyncSub">设备通过同一服务器定时同步并集中保存</p>
         </div>
-        <button type="button" class="btn-ghost device-sync-refresh" id="deviceSyncRefresh">刷新状态</button>
+        <div class="device-sync-actions">
+          <button type="button" class="btn-ghost device-sync-refresh" id="deviceSyncRefresh">刷新状态</button>
+          <button type="button" class="trend-toggle" data-trend-toggle="deviceSync" aria-expanded="false">展开详情 <span class="caret">▼</span></button>
+        </div>
       </div>
-      <div class="device-sync-summary" id="deviceSyncSummary"></div>
-      <div class="device-sync-grid" id="deviceSyncGrid"></div>
+      <div class="device-sync-body" id="deviceSyncBody" hidden>
+        <div class="device-sync-summary" id="deviceSyncSummary"></div>
+        <div class="device-sync-grid" id="deviceSyncGrid"></div>
+      </div>
     </section>
 
     <!-- 总时长：点阵图 + 折线图 -->
@@ -219,7 +224,7 @@
     <section class="fade-up" id="sec-hardware">
       <div class="sec-title">
         <h2>硬件监控</h2>
-        <span class="hint">折线图 · 随「每日 / 每周 / 累计」切换粒度</span>
+        <span class="hint">折线图 · 随「每日 / 每周 / 累计」切换粒度 · 每 10 分钟自动刷新</span>
       </div>
       <div class="hw-grid" id="hwGrid"></div>
     </section>
