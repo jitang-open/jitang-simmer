@@ -1,7 +1,8 @@
 /* ============================================================
  * Simmer Server · 硬件指标聚合
  *  - 原始数据一分钟一条，字段可为空
- *  - 单设备按桶取平均；全部设备时功耗求和，其余指标取平均
+ *  - 每日按十分钟桶、周按天、累计按月；单设备按桶取平均
+ *  - 全部设备时功耗求和，其余指标取平均
  *  - “当前值”仅接受十分钟内的样本，避免采集器退出后展示陈旧读数
  * ============================================================ */
 const db = require('./db');
@@ -65,12 +66,16 @@ function current(device, metric, reference = new Date()) {
 function rangeDefinition(range, reference) {
   const today = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
   if (range === 'daily') {
+    const slots = Array.from({ length: 24 * 6 }, (_, index) => ({
+      hour: Math.floor(index / 6),
+      minute: (index % 6) * 10,
+    }));
     return {
       start: today,
       end: today,
-      keys: Array.from({ length: 24 }, (_, hour) => `${dayStr(today)}T${pad(hour)}`),
-      labels: Array.from({ length: 24 }, (_, hour) => `${hour}:00`),
-      keyOf: ts => ts.slice(0, 13),
+      keys: slots.map(({ hour, minute }) => `${dayStr(today)}T${pad(hour)}:${pad(minute)}`),
+      labels: slots.map(({ hour, minute }) => `${hour}:${pad(minute)}`),
+      keyOf: ts => `${ts.slice(0, 14)}${Math.floor(Number(ts.slice(14, 16)) / 10)}0`,
     };
   }
   if (range === 'weekly') {

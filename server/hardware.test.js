@@ -91,9 +91,12 @@ test('同分钟幂等合并传感器，跨设备按指标语义聚合', async ()
   assert.equal((await request('/api/hardware/current?device=all&metric=cpu')).body.value, 60);
   assert.equal((await request('/api/hardware/current?device=all&metric=power')).body.value, 150);
   const cpuSeries = await request('/api/hardware/series?device=all&metric=cpu&range=daily');
-  assert.equal(cpuSeries.body.values[now.getHours()], 60);
+  const tenMinuteIndex = now.getHours() * 6 + Math.floor(now.getMinutes() / 10);
+  assert.equal(cpuSeries.body.labels.length, 144);
+  assert.equal(cpuSeries.body.labels[18], '3:00');
+  assert.equal(cpuSeries.body.values[tenMinuteIndex], 60);
   const powerSeries = await request('/api/hardware/series?device=all&metric=power&range=daily');
-  assert.equal(powerSeries.body.values[now.getHours()], 150);
+  assert.equal(powerSeries.body.values[tenMinuteIndex], 150);
 });
 
 test('暂停设备后服务端跳过硬件样本', async () => {
