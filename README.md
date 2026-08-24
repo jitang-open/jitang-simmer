@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🍲 Jitang Simmer · 鸡汤电脑统计
+# 🍲 Jitang Simmer · 鸡汤时迹
 
 **个人电脑使用情况统计面板** —— 软件时长 / AI Token / 硬件监控 / 多设备聚合
 
