@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SimmerCollector</RootNamespace>
     <AssemblyName>SimmerCollector</AssemblyName>
-    <Version>0.9.0</Version>
+    <Version>0.10.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- 单文件发布：dotnet publish -c Release -r win-x64 /p:PublishSingleFile=true -->
     <PublishSingleFile>false</PublishSingleFile>

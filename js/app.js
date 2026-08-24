@@ -123,7 +123,7 @@ function mountCustomSelect(wrap, { options, value, onChange, showDot = false, di
   wrap.innerHTML = `
     <button type="button" class="ds-btn" aria-haspopup="listbox" aria-expanded="false" ${disabled ? 'disabled' : ''}
       title="${escapeHTML(selected?.label || '')}">
-      ${showDot ? '<span class="sd-dot"></span>' : ''}<span class="ds-name">${escapeHTML(selected?.label || '')}</span><span class="caret">▼</span>
+      ${showDot ? `<span class="sd-dot ${escapeHTML(selected?.status || '')}"></span>` : ''}<span class="ds-name">${escapeHTML(selected?.label || '')}</span><span class="caret">▼</span>
     </button>
     <div class="ds-list" role="listbox"></div>`;
   const button = wrap.querySelector('.ds-btn');
@@ -135,7 +135,7 @@ function mountCustomSelect(wrap, { options, value, onChange, showDot = false, di
     item.className = 'ds-opt' + (option === selected ? ' sel' : '');
     item.setAttribute('role', 'option');
     item.setAttribute('aria-selected', option === selected ? 'true' : 'false');
-    item.innerHTML = `${showDot ? '<span class="sd-dot"></span>' : ''}<span class="ds-opt-label">${escapeHTML(option.label)}</span>${option.meta ? `<small>${escapeHTML(option.meta)}</small>` : ''}`;
+    item.innerHTML = `${showDot ? `<span class="sd-dot ${escapeHTML(option.status || '')}"></span>` : ''}<span class="ds-opt-label">${escapeHTML(option.label)}</span>${option.meta ? `<small>${escapeHTML(option.meta)}</small>` : ''}`;
     item.addEventListener('click', event => {
       event.stopPropagation();
       wrap.classList.remove('open');
@@ -143,6 +143,7 @@ function mountCustomSelect(wrap, { options, value, onChange, showDot = false, di
       const changed = option.key !== currentKey;
       currentKey = option.key;
       button.querySelector('.ds-name').textContent = option.label;
+      if (showDot) button.querySelector('.sd-dot').className = `sd-dot ${option.status || ''}`;
       button.title = option.label;
       list.querySelectorAll('.ds-opt').forEach(candidate => {
         candidate.classList.toggle('sel', candidate === item);
@@ -169,6 +170,21 @@ function formatTokens(value, compact = false) {
   if (number >= 1e6) return (number / 1e6).toFixed(number >= 1e7 ? 1 : 2).replace(/\.0+$/, '') + 'M';
   if (number >= 1e3) return (number / 1e3).toFixed(number >= 1e4 ? 1 : 2).replace(/\.0+$/, '') + 'K';
   return Math.round(number).toLocaleString('zh-CN');
+}
+
+const DEVICE_STATUS_LABEL = { online: '在线', offline: '离线', paused: '已暂停' };
+
+function deviceSyncAge(device) {
+  const seconds = Number(device?.syncAgeSeconds);
+  if (!Number.isFinite(seconds)) return '尚未同步';
+  if (seconds < 60) return '刚刚同步';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return `${Math.floor(seconds / 86400)} 天前`;
+}
+
+function deviceStatus(device) {
+  return device?.paused ? 'paused' : (device?.syncStatus || 'offline');
 }
 
 function settingsPayload() {
@@ -295,17 +311,37 @@ function applyMeta(rows) {
 }
 
 /* ---------------- 顶部：设备选择器 ---------------- */
+function selectDevice(deviceId, { scrollToTop = false } = {}) {
+  const valid = deviceId === 'all' || DB.devices.some(device => device.id === deviceId);
+  state.device = valid ? deviceId : 'all';
+  buildDeviceSelect();
+  renderSideDevices();
+  renderAll();
+  if (scrollToTop) window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function buildDeviceSelect() {
-  const opts = [{ id: 'all', name: '全部设备', host: '汇总统计' }, ...DB.devices];
+  const online = DB.devices.filter(device => deviceStatus(device) === 'online').length;
+  const paused = DB.devices.filter(device => deviceStatus(device) === 'paused').length;
+  const aggregateStatus = online > 0
+    ? 'online'
+    : (DB.devices.length > 0 && paused === DB.devices.length ? 'paused' : 'offline');
+  const opts = [{
+    id: 'all', name: '全部设备', host: `${online}/${DB.devices.length} 台在线 · 聚合统计`,
+    syncStatus: aggregateStatus,
+  }, ...DB.devices];
   mountCustomSelect($('#deviceSelect'), {
     options: opts.map(option => ({
       value: option.id,
       label: option.name,
-      meta: option.paused ? `已暂停 · ${option.host}` : option.host,
+      status: option.syncStatus || deviceStatus(option),
+      meta: option.id === 'all'
+        ? option.host
+        : `${DEVICE_STATUS_LABEL[deviceStatus(option)]} · ${deviceSyncAge(option)}`,
     })),
     value: state.device,
     showDot: true,
-    onChange: value => { state.device = value; renderAll(); },
+    onChange: value => selectDevice(value),
   });
 }
 
@@ -601,9 +637,9 @@ function renderSideDevices() {
   const PLAY_PATH = 'M8 5v14l11-7z';
   const wrap = $('#sideDevices');
   wrap.innerHTML = '<div class="side-dev-title">我的设备</div>' + DB.devices.map(d => `
-    <div class="side-dev ${d.paused ? 'paused' : ''}" data-device-id="${escapeHTML(d.id)}">
+    <div class="side-dev ${deviceStatus(d)} ${state.device === d.id ? 'selected' : ''}" data-device-id="${escapeHTML(d.id)}" role="button" tabindex="0">
       <span class="sd-dot"></span>
-      <div class="side-dev-copy"><div class="sd-name">${escapeHTML(d.name)}</div><div class="sd-host">${escapeHTML(d.paused ? '已暂停统计' : d.host)}</div></div>
+      <div class="side-dev-copy"><div class="sd-name">${escapeHTML(d.name)}</div><div class="sd-host">${escapeHTML(`${DEVICE_STATUS_LABEL[deviceStatus(d)]} · ${deviceSyncAge(d)}`)}</div></div>
       <div class="side-dev-actions">
         <button type="button" class="side-dev-action" data-device-action="rename" title="修改设备名"><svg viewBox="0 0 24 24"><path d="${EDIT_PATH}"/></svg></button>
         <button type="button" class="side-dev-action ${d.paused ? 'resume' : ''}" data-device-action="pause" title="${d.paused ? '恢复统计' : '暂停统计'}"><svg viewBox="0 0 24 24"><path d="${d.paused ? PLAY_PATH : PAUSE_PATH}"/></svg></button>
@@ -611,9 +647,86 @@ function renderSideDevices() {
     </div>`).join('');
   wrap.querySelectorAll('.side-dev').forEach(row => {
     const device = DB.devices.find(item => item.id === row.dataset.deviceId);
-    row.querySelector('[data-device-action="rename"]').addEventListener('click', () => openDeviceRename(device));
-    row.querySelector('[data-device-action="pause"]').addEventListener('click', () => updateDevice(device, { paused: !device.paused }));
+    row.addEventListener('click', event => {
+      if (!event.target.closest('.side-dev-action')) selectDevice(device.id, { scrollToTop: true });
+    });
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') selectDevice(device.id, { scrollToTop: true });
+    });
+    row.querySelector('[data-device-action="rename"]').addEventListener('click', event => {
+      event.stopPropagation();
+      openDeviceRename(device);
+    });
+    row.querySelector('[data-device-action="pause"]').addEventListener('click', event => {
+      event.stopPropagation();
+      updateDevice(device, { paused: !device.paused });
+    });
   });
+}
+
+function renderDeviceSync() {
+  const summary = $('#deviceSyncSummary');
+  const grid = $('#deviceSyncGrid');
+  const online = DB.devices.filter(device => deviceStatus(device) === 'online').length;
+  const offline = DB.devices.filter(device => deviceStatus(device) === 'offline').length;
+  const paused = DB.devices.filter(device => deviceStatus(device) === 'paused').length;
+  const totalRecords = DB.devices.reduce((sum, device) => sum + (Number(device.totalRecords) || 0), 0);
+  const selected = state.device === 'all' ? null : DB.devices.find(device => device.id === state.device);
+  $('#sideSyncState').textContent = online ? `${online} 台设备同步正常` : '当前无在线设备';
+  $('#sideSyncDot').className = `dot-live ${online ? 'online' : 'offline'}`;
+  $('#deviceSyncSub').textContent = selected
+    ? `当前查看 ${selected.name} · 其他设备仍继续向服务器同步`
+    : `服务器集中保存 ${DB.devices.length} 台设备的数据 · 当前为跨设备聚合视图`;
+  summary.innerHTML = [
+    ['在线设备', `${online} / ${DB.devices.length}`, 'online'],
+    ['离线设备', String(offline), offline ? 'offline' : 'online'],
+    ['暂停设备', String(paused), paused ? 'paused' : 'online'],
+    ['服务器记录', totalRecords.toLocaleString('zh-CN'), 'records'],
+  ].map(([label, value, tone]) => `
+    <div class="device-sync-stat ${tone}"><span>${escapeHTML(label)}</span><b>${escapeHTML(value)}</b></div>`).join('');
+
+  grid.innerHTML = DB.devices.map(device => {
+    const status = deviceStatus(device);
+    const active = state.device === device.id;
+    return `
+      <article class="sync-device ${status} ${active ? 'selected' : ''}" data-device-id="${escapeHTML(device.id)}">
+        <div class="sync-device-head">
+          <span class="sd-dot"></span>
+          <div><h3>${escapeHTML(device.name)}</h3><p>${escapeHTML(device.reportedName || device.host || device.id)}</p></div>
+          <span class="sync-status">${escapeHTML(DEVICE_STATUS_LABEL[status])}</span>
+        </div>
+        <div class="sync-channel-row">
+          <span class="${device.lastUsageSync ? 'ready' : ''}">软件</span>
+          <span class="${device.lastTokenSync ? 'ready' : ''}">Token</span>
+          <span class="${device.lastHardwareSync ? 'ready' : ''}">硬件</span>
+        </div>
+        <div class="sync-device-counts">
+          <span><b>${Number(device.usageMinutes || 0).toLocaleString('zh-CN')}</b>软件分钟</span>
+          <span><b>${Number(device.tokenEvents || 0).toLocaleString('zh-CN')}</b>Token 请求</span>
+          <span><b>${Number(device.hardwareSamples || 0).toLocaleString('zh-CN')}</b>硬件快照</span>
+        </div>
+        <div class="sync-device-foot">
+          <span>${escapeHTML(deviceSyncAge(device))} · 每 ${escapeHTML(device.syncIntervalMinutes || 5)} 分钟同步${device.collectorVersion ? ` · v${escapeHTML(device.collectorVersion)}` : ''}</span>
+          <button type="button" class="btn-ghost sync-device-view" ${active ? 'disabled' : ''}>${active ? '正在查看' : '查看此设备'}</button>
+        </div>
+      </article>`;
+  }).join('');
+  grid.querySelectorAll('.sync-device').forEach(card => {
+    card.querySelector('.sync-device-view').addEventListener('click', () =>
+      selectDevice(card.dataset.deviceId, { scrollToTop: true }));
+  });
+}
+
+async function refreshDeviceState({ renderCharts = false } = {}) {
+  if (typeof DB.refreshDevices !== 'function') return;
+  const before = DB.devices.map(device => `${device.id}:${device.lastSeen}:${device.paused}`).join('|');
+  await DB.refreshDevices();
+  if (state.device !== 'all' && !DB.devices.some(device => device.id === state.device)) state.device = 'all';
+  const after = DB.devices.map(device => `${device.id}:${device.lastSeen}:${device.paused}`).join('|');
+  buildDeviceSelect();
+  renderSideDevices();
+  renderDeviceSync();
+  if (renderCharts && before !== after) renderAll();
 }
 
 async function updateDevice(device, changes) {
@@ -623,6 +736,7 @@ async function updateDevice(device, changes) {
     Object.assign(device, updated, { host: device.host || device.id, paused: !!updated.paused });
     buildDeviceSelect();
     renderSideDevices();
+    renderDeviceSync();
     renderAll();
   } catch (error) {
     console.error('[simmer] 设备设置保存失败：', error);
@@ -1346,6 +1460,7 @@ async function renderAll() {
   const token = ++renderGeneration;
   const ctx = snapshotRenderState();
   renderWhitelist();
+  renderDeviceSync();
   await Promise.all([
     renderOverview(ctx, token),
     renderTotal(ctx, token),
@@ -1429,6 +1544,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   buildYearSelect();
   renderSideDevices();
   renderAll();
+
+  $('#deviceSyncRefresh').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = '同步中…';
+    try {
+      await refreshDeviceState();
+      await renderAll();
+    } catch (error) {
+      console.error('[simmer] 设备状态刷新失败：', error);
+      window.alert('设备状态刷新失败，请确认服务器连接正常。');
+    } finally {
+      button.disabled = false;
+      button.textContent = '刷新状态';
+    }
+  });
+  window.setInterval(() => {
+    refreshDeviceState({ renderCharts: true }).catch(error =>
+      console.error('[simmer] 自动刷新设备同步状态失败：', error));
+  }, 30_000);
 
   $('#wlAdd').addEventListener('click', () => openAppForm(null));
   $('#wlAll').addEventListener('click', () => {

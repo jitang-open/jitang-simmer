@@ -12,18 +12,44 @@ const pad = n => String(n).padStart(2, '0');
 const now = () => new Date();
 
 /* ---------- 设备 ---------- */
-function devices() {
-  return db.prepare(`
+function devices(reference = new Date()) {
+  const rows = db.prepare(`
     SELECT device_id AS id,
            COALESCE(NULLIF(custom_name, ''), name) AS name,
            name AS reportedName,
            custom_name AS customName,
            paused,
+           sync_interval_minutes AS syncIntervalMinutes,
+           collector_version AS collectorVersion,
+           last_usage_sync AS lastUsageSync,
+           last_token_sync AS lastTokenSync,
+           last_hardware_sync AS lastHardwareSync,
+           last_heartbeat AS lastHeartbeat,
            first_seen AS firstSeen,
-           last_seen AS lastSeen
-    FROM devices
+           last_seen AS lastSeen,
+           (SELECT COUNT(*) FROM usage_minutes usage WHERE usage.device_id=devices.device_id) AS usageMinutes,
+           (SELECT COUNT(*) FROM ai_token_events token WHERE token.device_id=devices.device_id) AS tokenEvents,
+           (SELECT COUNT(*) FROM hardware_samples hardware WHERE hardware.device_id=devices.device_id) AS hardwareSamples
+    FROM devices AS devices
     ORDER BY last_seen DESC
-  `).all().map(device => ({ ...device, paused: !!device.paused }));
+  `).all();
+  return rows.map(device => {
+    const lastSeenMs = Date.parse(device.lastSeen);
+    const syncAgeSeconds = Number.isFinite(lastSeenMs)
+      ? Math.max(0, Math.floor((reference.getTime() - lastSeenMs) / 1000))
+      : null;
+    const onlineWindowSeconds = Math.max(10, Number(device.syncIntervalMinutes) * 3) * 60;
+    const syncStatus = device.paused
+      ? 'paused'
+      : (syncAgeSeconds !== null && syncAgeSeconds <= onlineWindowSeconds ? 'online' : 'offline');
+    return {
+      ...device,
+      paused: !!device.paused,
+      syncStatus,
+      syncAgeSeconds,
+      totalRecords: device.usageMinutes + device.tokenEvents + device.hardwareSamples,
+    };
+  });
 }
 function deviceIds(device) {
   if (device && device !== 'all') return [device];

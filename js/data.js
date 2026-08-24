@@ -31,6 +31,21 @@ const MockDB = (() => {
     { id: 'laptop',  name: '办公笔记本', host: 'X1-CARBON',  os: 'Windows 11',     perf: 0.62, powerMin: 14,  powerMax: 64  },
     { id: 'htpc',    name: '客厅主机',   host: 'HTPC-01',    os: 'Windows 11',     perf: 0.40, powerMin: 32,  powerMax: 118 },
   ];
+  devices.forEach((device, index) => Object.assign(device, {
+    paused: false,
+    syncStatus: 'online',
+    syncAgeSeconds: 30 + index * 25,
+    syncIntervalMinutes: 5,
+    collectorVersion: '演示数据',
+    lastSeen: new Date(now.getTime() - (30 + index * 25) * 1000).toISOString(),
+    lastUsageSync: now.toISOString(),
+    lastTokenSync: now.toISOString(),
+    lastHardwareSync: now.toISOString(),
+    usageMinutes: 120000 - index * 26000,
+    tokenEvents: 2800 - index * 500,
+    hardwareSamples: 95000 - index * 17000,
+    totalRecords: 217800 - index * 43500,
+  }));
 
   const apps = [
     { id: 'vscode',  name: 'Visual Studio Code', icon: '🧩', color: '#3b82f6', base: 215, category: '开发工具' },
@@ -354,9 +369,13 @@ const MockDB = (() => {
       const device = devices.find(row => row.id === deviceId);
       if (!device) throw new Error('device_not_found');
       if (changes.name) device.name = String(changes.name);
-      if (typeof changes.paused === 'boolean') device.paused = changes.paused;
+      if (typeof changes.paused === 'boolean') {
+        device.paused = changes.paused;
+        device.syncStatus = changes.paused ? 'paused' : 'online';
+      }
       return { ...device };
     },
+    refreshDevices: async () => devices,
     allApps: async () => apps.map(a => ({ id: a.id, minutes: Math.round(a.base) })),
   };
 })();

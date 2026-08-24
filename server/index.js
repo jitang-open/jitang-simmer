@@ -11,6 +11,7 @@
  *  - GET/PUT /api/settings                     白名单与软件元数据（SRV-05）
  *  - POST /api/ai-token-events                 请求级 Token 数字事件（Bearer token 鉴权）
  *  - POST /api/hardware-samples                一分钟粒度硬件快照（Bearer token 鉴权）
+ *  - POST /api/device-heartbeat                无新数据时维持设备同步状态
  *  - GET  /api/hardware/{current,series}        硬件当前值与趋势
  *  - GET  /api/ai-tokens/*                     Token 汇总、趋势、热力图与来源状态
  *  - 静态托管前端（http://localhost:8788/ 直接真数据预览）
@@ -47,8 +48,14 @@ app.use(express.json({ limit: '8mb' }));
 
 /* ---------- 上报 ---------- */
 const upsertDevice = db.prepare(`
-  INSERT INTO devices (device_id, name, first_seen, last_seen) VALUES (@id, @name, @now, @now)
-  ON CONFLICT(device_id) DO UPDATE SET name = excluded.name, last_seen = excluded.last_seen
+  INSERT INTO devices (
+    device_id, name, sync_interval_minutes, collector_version, first_seen, last_seen
+  ) VALUES (@id, @name, @syncIntervalMinutes, @collectorVersion, @now, @now)
+  ON CONFLICT(device_id) DO UPDATE SET
+    name=excluded.name,
+    sync_interval_minutes=excluded.sync_interval_minutes,
+    collector_version=excluded.collector_version,
+    last_seen=excluded.last_seen
 `);
 const insertMinute = db.prepare(`
   INSERT INTO usage_minutes (device_id, ts, app) VALUES (?, ?, ?)
@@ -58,9 +65,27 @@ const insertBatch = db.transaction((deviceId, minutes) => {
   for (const m of minutes) insertMinute.run(deviceId, m.t, m.app);
 });
 const getDevicePaused = db.prepare('SELECT paused FROM devices WHERE device_id=?');
+const touchDeviceChannel = Object.freeze({
+  usage: db.prepare('UPDATE devices SET last_usage_sync=? WHERE device_id=?'),
+  token: db.prepare('UPDATE devices SET last_token_sync=? WHERE device_id=?'),
+  hardware: db.prepare('UPDATE devices SET last_hardware_sync=? WHERE device_id=?'),
+  heartbeat: db.prepare('UPDATE devices SET last_heartbeat=? WHERE device_id=?'),
+});
 
-function registerDevice(deviceId, deviceName, timestamp) {
-  upsertDevice.run({ id: deviceId, name: deviceName, now: timestamp });
+function registerDevice(deviceId, deviceName, timestamp, {
+  channel = 'heartbeat', syncIntervalMinutes = 5, collectorVersion = '',
+} = {}) {
+  const interval = Number.isInteger(syncIntervalMinutes) && syncIntervalMinutes >= 1 && syncIntervalMinutes <= 1440
+    ? syncIntervalMinutes
+    : 5;
+  const version = typeof collectorVersion === 'string' && collectorVersion.length <= 40
+    ? collectorVersion
+    : '';
+  upsertDevice.run({
+    id: deviceId, name: deviceName, now: timestamp,
+    syncIntervalMinutes: interval, collectorVersion: version,
+  });
+  touchDeviceChannel[channel]?.run(timestamp, deviceId);
   return !!getDevicePaused.get(deviceId)?.paused;
 }
 
@@ -69,6 +94,16 @@ function auth(req, res, next) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   next();
+}
+
+const safeText = (value, max, { allowEmpty = true } = {}) =>
+  typeof value === 'string' && value.length <= max && (allowEmpty || value.length > 0);
+
+function syncMeta(body = {}) {
+  return {
+    syncIntervalMinutes: body.syncIntervalMinutes,
+    collectorVersion: body.collectorVersion,
+  };
 }
 
 app.post('/api/ingest', auth, (req, res) => {
@@ -80,18 +115,30 @@ app.post('/api/ingest', auth, (req, res) => {
   if (bad) return res.status(400).json({ error: 'bad_minute_row' });
 
   const nowIso = new Date().toISOString();
-  const paused = registerDevice(deviceId, deviceName, nowIso);
+  const paused = registerDevice(deviceId, deviceName, nowIso, {
+    channel: 'usage', ...syncMeta(req.body),
+  });
   if (paused) return res.json({ ok: true, received: 0, skipped: minutes.length, paused: true });
   insertBatch(deviceId, minutes);
   res.json({ ok: true, received: minutes.length });
+});
+
+app.post('/api/device-heartbeat', auth, (req, res) => {
+  const { deviceId, deviceName } = req.body || {};
+  if (!safeText(deviceId, 200, { allowEmpty: false }) ||
+      !safeText(deviceName, 200, { allowEmpty: false })) {
+    return res.status(400).json({ error: 'bad_request' });
+  }
+  const paused = registerDevice(deviceId, deviceName, new Date().toISOString(), {
+    channel: 'heartbeat', ...syncMeta(req.body),
+  });
+  res.json({ ok: true, paused });
 });
 
 /* ---------- AI Token 请求级事件上报（TS-04/06） ---------- */
 const SOURCE_STATES = new Set(['ready', 'installed_no_data', 'history_only', 'not_found', 'incompatible', 'error']);
 const SOURCE_EVENT_ID = /^[a-f0-9]{64}$/;
 const MAX_TOKEN_EVENTS = 5000;
-const safeText = (value, max, { allowEmpty = true } = {}) =>
-  typeof value === 'string' && value.length <= max && (allowEmpty || value.length > 0);
 const safeToken = value => Number.isSafeInteger(value) && value >= 0;
 const safeTimestamp = value => safeText(value, 64, { allowEmpty: false }) && Number.isFinite(Date.parse(value));
 
@@ -178,7 +225,9 @@ app.post('/api/ai-token-events', auth, (req, res) => {
   }
 
   const receivedAt = new Date().toISOString();
-  const paused = registerDevice(deviceId, deviceName, receivedAt);
+  const paused = registerDevice(deviceId, deviceName, receivedAt, {
+    channel: 'token', ...syncMeta(req.body),
+  });
   if (paused) return res.json({
     ok: true,
     received: 0,
@@ -273,7 +322,9 @@ app.post('/api/hardware-samples', auth, (req, res) => {
     return res.status(400).json({ error: 'invalid_hardware_payload' });
   }
 
-  const paused = registerDevice(deviceId, deviceName, new Date().toISOString());
+  const paused = registerDevice(deviceId, deviceName, new Date().toISOString(), {
+    channel: 'hardware', ...syncMeta(req.body),
+  });
   if (paused) return res.json({ ok: true, received: 0, skipped: normalized.length, paused: true });
   storeHardwareBatch(deviceId, normalized);
   res.json({ ok: true, received: normalized.length });

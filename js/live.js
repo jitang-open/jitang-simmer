@@ -33,6 +33,27 @@ const LiveDB = (() => {
   };
   const meta = exe => APP_META[exe] ||
     { name: exe.replace(/\.exe$/i, ''), icon: '📦', color: '#8b949e', category: '其他' };
+  const normalizeDevice = device => ({
+    id: device.id,
+    name: device.name,
+    host: device.reportedName || device.id,
+    os: '',
+    reportedName: device.reportedName || device.name,
+    paused: !!device.paused,
+    syncStatus: device.syncStatus || (device.paused ? 'paused' : 'offline'),
+    syncAgeSeconds: device.syncAgeSeconds,
+    syncIntervalMinutes: device.syncIntervalMinutes || 5,
+    collectorVersion: device.collectorVersion || '',
+    lastSeen: device.lastSeen || null,
+    lastUsageSync: device.lastUsageSync || null,
+    lastTokenSync: device.lastTokenSync || null,
+    lastHardwareSync: device.lastHardwareSync || null,
+    lastHeartbeat: device.lastHeartbeat || null,
+    usageMinutes: Number(device.usageMinutes) || 0,
+    tokenEvents: Number(device.tokenEvents) || 0,
+    hardwareSamples: Number(device.hardwareSamples) || 0,
+    totalRecords: Number(device.totalRecords) || 0,
+  });
   const METRIC_DEFS = [
     { id: 'cpu',     name: 'CPU 占用', unit: '%',  color: '#58a6ff' },
     { id: 'gpu',     name: 'GPU 占用', unit: '%',  color: '#bc8cff' },
@@ -79,18 +100,11 @@ const LiveDB = (() => {
     const y0 = range.minDate ? +String(range.minDate).slice(0, 4) : nowYear;
     for (let y = Math.min(y0, nowYear); y <= nowYear; y++) yearList.push(y);
 
-    return {
+    const liveDb = {
       live: true,
       yearList,
       apps: totals.map(r => ({ id: r.id, ...meta(r.id) })),
-      devices: devicesRaw.map(d => ({
-        id: d.id,
-        name: d.name,
-        host: d.id,
-        os: '',
-        reportedName: d.reportedName || d.name,
-        paused: !!d.paused,
-      })),
+      devices: devicesRaw.map(normalizeDevice),
       metricDefs: METRIC_DEFS,
       serverSettings: settingsRaw.settings,
       saveSettings: settings => j('/api/settings', {
@@ -145,6 +159,12 @@ const LiveDB = (() => {
       tokenSources: device =>
         j(`/api/ai-tokens/sources?device=${encodeURIComponent(device || 'all')}`),
     };
+    liveDb.refreshDevices = async () => {
+      const rows = (await j('/api/devices')).map(normalizeDevice);
+      liveDb.devices.splice(0, liveDb.devices.length, ...rows);
+      return liveDb.devices;
+    };
+    return liveDb;
   }
 
   return { create, BASE };

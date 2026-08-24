@@ -50,8 +50,8 @@
     <div class="side-devices" id="sideDevices"></div>
 
     <div class="side-foot">
-      <span class="dot-live"></span> 数据采集运行中<br>
-      <span class="side-ver">v0.9.0 · Local Data</span>
+      <span class="dot-live" id="sideSyncDot"></span> <span id="sideSyncState">等待设备同步</span><br>
+      <span class="side-ver">v0.10.0 · Local Data</span>
     </div>
   </aside>
 
@@ -83,6 +83,19 @@
 
     <!-- 概览卡片 -->
     <section class="ov-cards fade-up" id="sec-overview"></section>
+
+    <!-- 多设备同步状态与快速切换 -->
+    <section class="card fade-up device-sync-card" id="sec-device-sync">
+      <div class="card-head">
+        <div>
+          <h2>多设备同步</h2>
+          <p class="card-sub" id="deviceSyncSub">设备通过同一服务器定时同步并集中保存</p>
+        </div>
+        <button type="button" class="btn-ghost device-sync-refresh" id="deviceSyncRefresh">刷新状态</button>
+      </div>
+      <div class="device-sync-summary" id="deviceSyncSummary"></div>
+      <div class="device-sync-grid" id="deviceSyncGrid"></div>
+    </section>
 
     <!-- 总时长：点阵图 + 折线图 -->
     <section class="card fade-up" id="sec-total">

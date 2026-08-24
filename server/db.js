@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS devices (
   name        TEXT NOT NULL,
   custom_name TEXT,
   paused      INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1)),
+  sync_interval_minutes INTEGER NOT NULL DEFAULT 5,
+  collector_version TEXT NOT NULL DEFAULT '',
+  last_usage_sync TEXT,
+  last_token_sync TEXT,
+  last_hardware_sync TEXT,
+  last_heartbeat TEXT,
   first_seen  TEXT NOT NULL,
   last_seen   TEXT NOT NULL
 );
@@ -135,6 +141,12 @@ if (!tokenTableSql.includes("'workbuddy'")) {
 const deviceColumns = new Set(db.prepare('PRAGMA table_info(devices)').all().map(column => column.name));
 if (!deviceColumns.has('custom_name')) db.exec('ALTER TABLE devices ADD COLUMN custom_name TEXT');
 if (!deviceColumns.has('paused')) db.exec('ALTER TABLE devices ADD COLUMN paused INTEGER NOT NULL DEFAULT 0');
+if (!deviceColumns.has('sync_interval_minutes')) db.exec('ALTER TABLE devices ADD COLUMN sync_interval_minutes INTEGER NOT NULL DEFAULT 5');
+if (!deviceColumns.has('collector_version')) db.exec("ALTER TABLE devices ADD COLUMN collector_version TEXT NOT NULL DEFAULT ''");
+if (!deviceColumns.has('last_usage_sync')) db.exec('ALTER TABLE devices ADD COLUMN last_usage_sync TEXT');
+if (!deviceColumns.has('last_token_sync')) db.exec('ALTER TABLE devices ADD COLUMN last_token_sync TEXT');
+if (!deviceColumns.has('last_hardware_sync')) db.exec('ALTER TABLE devices ADD COLUMN last_hardware_sync TEXT');
+if (!deviceColumns.has('last_heartbeat')) db.exec('ALTER TABLE devices ADD COLUMN last_heartbeat TEXT');
 
 // 部分驱动以 0°C 表示“传感器无读数”；历史零值统一迁移为空，避免伪装成真实温度。
 db.exec(`

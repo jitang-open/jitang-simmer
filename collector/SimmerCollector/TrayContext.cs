@@ -109,7 +109,7 @@ internal class TrayContext : ApplicationContext
     private async Task UploadDue()
     {
         bool due = (DateTime.Now - _lastUpload).TotalMinutes >= _cfg.UploadIntervalMinutes;
-        bool full = _store.Count >= 300;
+        bool full = _store.Count >= 300 || _hardwareStore.Count >= 300;
         if (due || full) await UploadNow();
     }
 
@@ -126,7 +126,17 @@ internal class TrayContext : ApplicationContext
             var hardwareBatch = _hardwareStore.Peek(2000);
             if (batch.Count == 0 && hardwareBatch.Count == 0)
             {
-                UpdateTooltip("队列为空");
+                _lastUpload = DateTime.Now;
+                bool heartbeatOk = await Uploader.HeartbeatAsync(_cfg);
+                if (heartbeatOk)
+                {
+                    _lastSuccess = DateTime.Now;
+                    UpdateTooltip("同步正常 · 暂无新数据");
+                }
+                else
+                {
+                    UpdateTooltip("同步失败 · 暂无新数据");
+                }
                 return;
             }
 
@@ -243,6 +253,7 @@ internal class SettingsForm : Form
     private readonly TextBox _txtToken = new() { Top = 60, Left = 110, Width = 260 };
     private readonly TextBox _txtName = new() { Top = 90, Left = 110, Width = 260 };
     private readonly NumericUpDown _numIdle = new() { Top = 120, Left = 110, Width = 80, Minimum = 1, Maximum = 60 };
+    private readonly NumericUpDown _numSync = new() { Top = 120, Left = 320, Width = 50, Minimum = 1, Maximum = 60 };
     private readonly CheckBox _chkTokens = new() { Top = 150, Left = 110, Width = 220, Text = "启用 AI Token 统计" };
     private readonly TextBox _txtCodex = new() { Top = 180, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
     private readonly TextBox _txtZCode = new() { Top = 210, Left = 110, Width = 220, PlaceholderText = "留空自动检测" };
@@ -264,6 +275,7 @@ internal class SettingsForm : Form
             Controls.Add(new Label { Text = text, AutoSize = true, Top = top + 3, Left = 15 });
 
         Label("服务器地址", 30); Label("上报 Token", 60); Label("设备名称", 90); Label("空闲阈值(分钟)", 120);
+        Controls.Add(new Label { Text = "同步间隔(分)", AutoSize = true, Top = 123, Left = 225 });
         Label("Codex 数据目录", 180); Label("ZCode 数据目录", 210); Label("DSH 数据目录", 240);
         Label("WorkBuddy 数据目录", 270);
 
@@ -271,6 +283,7 @@ internal class SettingsForm : Form
         _txtToken.Text = cfg.Token;
         _txtName.Text = cfg.DeviceName;
         _numIdle.Value = cfg.IdleThresholdMinutes;
+        _numSync.Value = Math.Clamp(cfg.UploadIntervalMinutes, 1, 60);
         _chkTokens.Checked = cfg.EnableTokenStatistics;
         _txtCodex.Text = cfg.CodexHome;
         _txtZCode.Text = cfg.ZCodeHome;
@@ -278,7 +291,7 @@ internal class SettingsForm : Form
         _txtWorkBuddy.Text = cfg.WorkBuddyHome;
         _chkHardware.Checked = cfg.EnableHardwareMonitoring;
         _chkAutoStart.Checked = cfg.StartWithWindows && AutoStartManager.IsRegistered();
-        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _chkTokens, _txtCodex, _txtZCode, _txtDsh, _txtWorkBuddy, _chkHardware, _chkAutoStart]);
+        Controls.AddRange([_txtUrl, _txtToken, _txtName, _numIdle, _numSync, _chkTokens, _txtCodex, _txtZCode, _txtDsh, _txtWorkBuddy, _chkHardware, _chkAutoStart]);
         AddBrowseButton(_txtCodex, 180);
         AddBrowseButton(_txtZCode, 210);
         AddBrowseButton(_txtDsh, 240);
@@ -301,6 +314,7 @@ internal class SettingsForm : Form
             cfg.Token = _txtToken.Text.Trim();
             cfg.DeviceName = _txtName.Text.Trim();
             cfg.IdleThresholdMinutes = (int)_numIdle.Value;
+            cfg.UploadIntervalMinutes = (int)_numSync.Value;
             cfg.EnableTokenStatistics = _chkTokens.Checked;
             cfg.CodexHome = _txtCodex.Text.Trim();
             cfg.ZCodeHome = _txtZCode.Text.Trim();
