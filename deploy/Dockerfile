@@ -1,8 +1,16 @@
 ARG NODE_IMAGE=node:24-bookworm-slim
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security
 FROM ${NODE_IMAGE} AS dependencies
 
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
 WORKDIR /app/server
-RUN apt-get update \
+RUN sed -i \
+      -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+      -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
