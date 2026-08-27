@@ -1,4 +1,5 @@
-FROM node:24-bookworm-slim
+ARG NODE_IMAGE=node:24-bookworm-slim
+FROM ${NODE_IMAGE}
 
 ENV NODE_ENV=production \
     SIMMER_HOST=0.0.0.0 \
