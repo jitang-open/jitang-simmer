@@ -1,7 +1,10 @@
 {$SIMMER_DOMAIN} {
   encode zstd gzip
 
-  @collector path /api/ingest /api/ai-token-events
+  @collector {
+    method POST
+    path /api/ingest /api/ai-token-events /api/hardware-samples /api/device-heartbeat
+  }
   handle @collector {
     reverse_proxy simmer:8788
   }

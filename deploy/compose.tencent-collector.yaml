@@ -1,0 +1,23 @@
+services:
+  simmer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      SIMMER_HOST: 0.0.0.0
+      SIMMER_PORT: 8788
+      SIMMER_TOKEN: ${SIMMER_TOKEN:?请在 deploy/.env 中设置 SIMMER_TOKEN}
+    ports:
+      - "127.0.0.1:8788:8788"
+    volumes:
+      - /opt/pc-usage-dashboard/data:/app/server/data
+    restart: unless-stopped
+    networks:
+      jitang_proxy:
+        aliases:
+          - simmer-dashboard
+
+networks:
+  jitang_proxy:
+    external: true
+    name: jitang-object-storage
