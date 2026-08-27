@@ -6,8 +6,18 @@
  *  - APP_META 为内置进程映射表（CAP-02 第一版）
  * ============================================================ */
 const LiveDB = (() => {
-  // 由服务端（本机或腾讯云 HTTPS）托管时始终同源；仅 file:// 演示页回退本机端口。
-  const BASE = location.protocol === 'file:' ? 'http://localhost:8788' : location.origin;
+  // 从当前脚本地址推导部署前缀：根路径和 /simmer-dashboard/ 等反向代理子路径均可使用。
+  // 仅 file:// 演示页回退本机端口。
+  const liveScriptPath = document.currentScript?.src
+    ? new URL(document.currentScript.src).pathname
+    : '';
+  const scriptSuffix = '/js/live.js';
+  const hostedBasePath = liveScriptPath.endsWith(scriptSuffix)
+    ? liveScriptPath.slice(0, -scriptSuffix.length)
+    : '';
+  const BASE = location.protocol === 'file:'
+    ? 'http://localhost:8788'
+    : location.origin + hostedBasePath;
 
   const APP_META = {
     'Code.exe':            { name: 'Visual Studio Code', icon: '🧩', color: '#3b82f6', category: '开发工具' },
