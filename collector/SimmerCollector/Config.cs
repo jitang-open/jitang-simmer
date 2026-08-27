@@ -2,7 +2,10 @@ using System.Text.Json;
 
 namespace SimmerCollector;
 
-/// <summary>采集端配置：持久化于 %APPDATA%\SimmerCollector\config.json（CAP-05 / CAP-07）</summary>
+/// <summary>
+/// 采集端配置：默认持久化于 %APPDATA%\SimmerCollector；安装目录存在 portable.flag 时，
+/// 改用 EXE 同目录下的 data，便于整体安装、备份和迁移（CAP-05 / CAP-07）。
+/// </summary>
 internal class Config
 {
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N").Substring(0, 12);
@@ -29,8 +32,21 @@ internal class Config
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
-    public static string Dir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SimmerCollector");
+    public static string Dir { get; } = ResolveDataDirectory();
+
+    private static string ResolveDataDirectory()
+    {
+        string? configured = Environment.GetEnvironmentVariable("SIMMER_DATA_DIR");
+        if (!string.IsNullOrWhiteSpace(configured))
+            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured));
+
+        string installRoot = AppContext.BaseDirectory;
+        if (File.Exists(Path.Combine(installRoot, "portable.flag")))
+            return Path.Combine(installRoot, "data");
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SimmerCollector");
+    }
 
     private static string PathFor(string file) => System.IO.Path.Combine(Dir, file);
 

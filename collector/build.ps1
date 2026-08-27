@@ -1,11 +1,22 @@
+param(
+    [string]$OutputDirectory = '',
+    [switch]$Portable
+)
+
 $ErrorActionPreference = 'Stop'
 
 $collectorRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $collectorRoot
 $scannerProject = Join-Path $collectorRoot 'SimmerTokenScan'
 $collectorProject = Join-Path $collectorRoot 'SimmerCollector'
-$runtimeScanner = Join-Path $collectorRoot 'simmer-token-scan.exe'
-$runtimeCollector = Join-Path $collectorRoot 'SimmerCollector.exe'
+$runtimeRoot = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $collectorRoot
+} else {
+    [System.IO.Path]::GetFullPath($OutputDirectory)
+}
+New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+$runtimeScanner = Join-Path $runtimeRoot 'simmer-token-scan.exe'
+$runtimeCollector = Join-Path $runtimeRoot 'SimmerCollector.exe'
 
 $cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue
 $cargo = if ($cargoCommand) { $cargoCommand.Source } else {
@@ -39,6 +50,13 @@ if ($LASTEXITCODE -ne 0) { throw "采集器构建失败：$LASTEXITCODE" }
 
 Copy-Item -LiteralPath (Join-Path $scannerProject 'target\release\simmer-token-scan.exe') -Destination $runtimeScanner -Force
 Copy-Item -LiteralPath (Join-Path $collectorProject 'bin\Release\net8.0-windows\win-x64\publish\SimmerCollector.exe') -Destination $runtimeCollector -Force
+$portableMarker = Join-Path $runtimeRoot 'portable.flag'
+if ($Portable) {
+    [System.IO.File]::WriteAllText($portableMarker, '')
+} elseif (Test-Path -LiteralPath $portableMarker) {
+    Remove-Item -LiteralPath $portableMarker -Force
+}
 
 Write-Host "构建完成：$runtimeCollector"
 Write-Host "构建完成：$runtimeScanner"
+if ($Portable) { Write-Host "便携数据目录：$(Join-Path $runtimeRoot 'data')" }
