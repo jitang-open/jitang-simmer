@@ -5,8 +5,8 @@ services:
       dockerfile: deploy/Dockerfile
       args:
         NODE_IMAGE: dockerproxy.net/library/node:24-bookworm-slim
-        DEBIAN_MIRROR: https://mirrors.cloud.tencent.com/debian
-        DEBIAN_SECURITY_MIRROR: https://mirrors.cloud.tencent.com/debian-security
+        DEBIAN_MIRROR: http://mirrors.cloud.tencent.com/debian
+        DEBIAN_SECURITY_MIRROR: http://mirrors.cloud.tencent.com/debian-security
     environment:
       SIMMER_HOST: 0.0.0.0
       SIMMER_PORT: 8788
