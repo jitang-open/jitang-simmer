@@ -1,4 +1,14 @@
 ARG NODE_IMAGE=node:24-bookworm-slim
+FROM ${NODE_IMAGE} AS dependencies
+
+WORKDIR /app/server
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --omit=dev
+
 FROM ${NODE_IMAGE}
 
 ENV NODE_ENV=production \
@@ -7,7 +17,7 @@ ENV NODE_ENV=production \
 
 WORKDIR /app/server
 COPY server/package.json server/package-lock.json ./
-RUN npm ci --omit=dev
+COPY --from=dependencies /app/server/node_modules ./node_modules
 
 COPY server/ ./
 COPY index.html /app/index.html
