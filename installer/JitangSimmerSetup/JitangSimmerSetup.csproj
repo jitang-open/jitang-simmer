@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Jitang-Simmer-Setup</AssemblyName>
+    <RootNamespace>JitangSimmerSetup</RootNamespace>
+    <Version>0.10.0</Version>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon Condition="'$(SetupIconFile)' != ''">$(SetupIconFile)</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(PayloadCollector)"
+                      LogicalName="JitangSimmerSetup.payload.SimmerCollector.exe"
+                      Condition="'$(PayloadCollector)' != ''" />
+    <EmbeddedResource Include="$(PayloadScanner)"
+                      LogicalName="JitangSimmerSetup.payload.simmer-token-scan.exe"
+                      Condition="'$(PayloadScanner)' != ''" />
+    <EmbeddedResource Include="$(DeploymentConfigFile)"
+                      LogicalName="JitangSimmerSetup.deployment.json"
+                      Condition="'$(DeploymentConfigFile)' != ''" />
+  </ItemGroup>
+
+</Project>

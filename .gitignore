@@ -16,3 +16,8 @@ collector/SimmerCollector/obj/
 collector/SimmerCollector.exe
 collector/SimmerTokenScan/target/
 collector/simmer-token-scan.exe
+
+# Windows 安装包构建产物
+installer/JitangSimmerSetup/bin/
+installer/JitangSimmerSetup/obj/
+artifacts/

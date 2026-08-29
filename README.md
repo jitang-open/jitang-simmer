@@ -47,7 +47,9 @@ collector/（C# 采集端） ──┴──上报──▶ server/（Node 后�
 3. “同步间隔”可设置为 1–60 分钟，默认 5 分钟；有数据时批量上传，无新数据时发送轻量心跳。断网期间软件和硬件队列保留，服务器恢复后继续同步。
 4. 面板选择“全部设备”时软件时长和 Token 求和、硬件百分比/温度取平均、功耗求和；选择具体设备后，全部卡片、趋势、Token 和硬件图表只查询该设备。
 
-当前开发机也可直接双击 [`启动 Jitang Simmer.cmd`](./启动%20Jitang%20Simmer.cmd)，它会使用终端 PATH 中的 Node.js 24 启动后端、采集端并打开面板。若需从源码重新生成两个采集端程序，在 PowerShell 执行 `collector/build.ps1`。
+当前开发机也可直接双击 [`启动 Jitang Simmer.cmd`](./启动%20Jitang%20Simmer.cmd)，它会启动采集端，并根据 `%APPDATA%\SimmerCollector\config.json` 中的中心服务器地址打开对应面板；脚本不再自动启动本地后端，避免误看本地 SQLite 数据。若需从源码重新生成两个采集端程序，在 PowerShell 执行 `collector/build.ps1`。
+
+要在其他 Windows x64 电脑上安装，运行 `installer/build-installer.ps1`生成单文件 `artifacts/Jitang-Simmer-Setup-x64.exe`。安装包自带 .NET 8 运行时、采集器和 Token 扫描器，会为新电脑生成独立设备 ID，配置中心服务器，并注册登录自启、快捷方式及卸载入口。
 
 如需显式使用当前开发机的 Node.js 24，可在 `server/` 目录运行：
 
