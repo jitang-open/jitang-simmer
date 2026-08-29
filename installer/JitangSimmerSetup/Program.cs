@@ -56,6 +56,14 @@ internal static class CommandLine
             return true;
         }
 
+        if (args.Contains("--ui-smoke-test", StringComparer.OrdinalIgnoreCase))
+        {
+            using var form = new InstallerForm(DeploymentConfig.Load());
+            _ = form.Handle;
+            form.CreateControl();
+            return true;
+        }
+
         return false;
     }
 

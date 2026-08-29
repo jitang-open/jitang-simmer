@@ -188,7 +188,12 @@ internal sealed class BrandMark : Control
 {
     public BrandMark()
     {
-        DoubleBuffered = true;
+        SetStyle(
+            ControlStyles.SupportsTransparentBackColor |
+            ControlStyles.UserPaint |
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer,
+            true);
         BackColor = Color.Transparent;
     }
 
