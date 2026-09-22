@@ -54,8 +54,57 @@ swiftc -O -o "$SCRIPT_DIR/build/simmer-hw-probe" \
 cp "$SCRIPT_DIR/build/simmer-hw-probe" "$OUTPUT_DIR/simmer-hw-probe"
 chmod +x "$OUTPUT_DIR/simmer-hw-probe"
 
+# ---- 3) 菜单栏状态图标（打包成 .app，附件应用不占 Dock） ----
+echo "==> 构建 simmer-menubar (swiftc + .app)"
+swiftc -O -o "$SCRIPT_DIR/build/simmer-menubar" \
+  "$SCRIPT_DIR/Sources/simmer-menubar/main.swift" \
+  -framework AppKit
+
+# 菜单栏图标是面向用户的应用，放在安装根目录（OUTPUT_DIR 的上一级），
+# 与「Jitang Simmer.app」并列，便于在访达里找到
+MENUBAR_APP="$(dirname "$OUTPUT_DIR")/Jitang Simmer 图标.app"
+rm -rf "$MENUBAR_APP"
+mkdir -p "$MENUBAR_APP/Contents/MacOS"
+cp "$SCRIPT_DIR/build/simmer-menubar" "$MENUBAR_APP/Contents/MacOS/simmer-menubar"
+chmod +x "$MENUBAR_APP/Contents/MacOS/simmer-menubar"
+cat > "$MENUBAR_APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>simmer-menubar</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.jitang.simmer.menubar</string>
+	<key>CFBundleName</key>
+	<string>Jitang Simmer 图标</string>
+	<key>CFBundleDisplayName</key>
+	<string>Jitang Simmer 图标</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.12.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.12.0</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<!-- 只在菜单栏出现，不占 Dock、不进程序切换器 -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
+PLIST
+
 echo ""
 echo "构建完成："
 echo "  $OUTPUT_DIR/simmer-token-scan"
 echo "  $OUTPUT_DIR/simmer-fg-probe"
 echo "  $OUTPUT_DIR/simmer-hw-probe"
+echo "  $MENUBAR_APP"

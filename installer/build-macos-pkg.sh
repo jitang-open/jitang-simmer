@@ -228,6 +228,87 @@ fi
 # 若已加载但未运行，主动拉起一次
 launchctl kickstart "gui/$UID_NUM/$LABEL" 2>/dev/null || true
 
+# ---- 菜单栏状态图标（附件应用，登录后常驻） ----
+MENUBAR_LABEL="io.jitang.simmer.menubar"
+MENUBAR_BIN="$APP_DIR/Jitang Simmer 图标.app/Contents/MacOS/simmer-menubar"
+MENUBAR_PLIST="$LA_DIR/$MENUBAR_LABEL.plist"
+if [ -x "$MENUBAR_BIN" ]; then
+  cat > "$MENUBAR_PLIST" <<MENUBAR_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$MENUBAR_LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$MENUBAR_BIN</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+</dict>
+</plist>
+MENUBAR_EOF
+  /bin/chown "$CONSOLE_USER" "$MENUBAR_PLIST" 2>/dev/null || true
+  /bin/chmod 644 "$MENUBAR_PLIST"
+
+  launchctl bootout "gui/$UID_NUM/$MENUBAR_LABEL" 2>/dev/null || true
+  launchctl enable "gui/$UID_NUM/$MENUBAR_LABEL" 2>/dev/null || true
+  # 旧实例可能仍在退出中：菜单栏应用有单实例保护，若旧进程未消失，
+  # 新实例会主动退出。这里等它真正消失（最多 5 秒）。
+  MB_WAIT=0
+  while [ "$MB_WAIT" -lt 10 ]; do
+    pgrep -x simmer-menubar >/dev/null 2>&1 || break
+    sleep 0.5
+    MB_WAIT=$((MB_WAIT + 1))
+  done
+  pkill -x simmer-menubar 2>/dev/null || true
+  sleep 0.5
+  MB_ATTEMPT=1
+  MB_OK=0
+  while [ "$MB_ATTEMPT" -le 8 ]; do
+    if launchctl bootstrap "gui/$UID_NUM" "$MENUBAR_PLIST" 2>/dev/null; then
+      MB_OK=1
+      break
+    fi
+    sleep 1
+    [ "$MB_ATTEMPT" -ge 3 ] && launchctl bootout "gui/$UID_NUM/$MENUBAR_LABEL" 2>/dev/null
+    MB_ATTEMPT=$((MB_ATTEMPT + 1))
+  done
+  if [ "$MB_OK" = "1" ]; then
+    log "菜单栏图标 LaunchAgent 已加载（第 $MB_ATTEMPT 次尝试）"
+  else
+    launchctl load -w "$MENUBAR_PLIST" 2>/dev/null \
+      && log "菜单栏图标已通过 load -w 加载" \
+      || log "菜单栏图标加载失败；可双击「Jitang Simmer 图标.app」手动打开"
+  fi
+  launchctl kickstart "gui/$UID_NUM/$MENUBAR_LABEL" 2>/dev/null || true
+
+  # 启动后校验：没起来就再拉一次（单实例保护或竞态可能让它退出）
+  MB_CHECK=0
+  while [ "$MB_CHECK" -lt 6 ]; do
+    if pgrep -x simmer-menubar >/dev/null 2>&1; then
+      log "菜单栏图标已运行"
+      break
+    fi
+    launchctl kickstart "gui/$UID_NUM/$MENUBAR_LABEL" 2>/dev/null || true
+    sleep 1
+    MB_CHECK=$((MB_CHECK + 1))
+  done
+  pgrep -x simmer-menubar >/dev/null 2>&1 || log "菜单栏图标未在运行，可双击「Jitang Simmer 图标.app」手动打开"
+else
+  log "未找到菜单栏图标应用（$MENUBAR_BIN），跳过"
+fi
+
 # 目录归属：日志与状态文件由用户写入
 /bin/chown -R "$CONSOLE_USER" "$APP_DIR/logs" 2>/dev/null || true
 

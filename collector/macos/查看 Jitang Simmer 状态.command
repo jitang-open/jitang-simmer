@@ -52,7 +52,7 @@ echo ""
 
 # ---- 采集进程 ----
 echo "---- 采集进程 ----"
-COLLECTORS="$(pgrep -f "simmer-collector\.js" 2>/dev/null)"
+COLLECTORS="$(pgrep -f "collector/macos/simmer-collector\.js" 2>/dev/null)"
 COUNT="$(printf '%s\n' "$COLLECTORS" | grep -c . || true)"
 if [ "${COUNT:-0}" -gt 0 ]; then
   printf '%s\n' "$COLLECTORS" | while read -r pid; do
@@ -65,9 +65,17 @@ else
   echo "采集代理 : ❌ 未运行"
 fi
 for probe in simmer-fg-probe simmer-hw-probe; do
-  PPID_="$(pgrep -f "$probe" 2>/dev/null | head -1)"
+  PPID_="$(pgrep -x "$probe" 2>/dev/null | head -1)"
   [ -n "$PPID_" ] && echo "$probe : PID $PPID_" || echo "$probe : 未运行"
 done
+
+# 菜单栏状态图标
+MENUBAR_PID="$(pgrep -x simmer-menubar 2>/dev/null | head -1)"
+if [ -n "$MENUBAR_PID" ]; then
+  echo "菜单栏图标 : PID $MENUBAR_PID（菜单栏可见）"
+else
+  echo "菜单栏图标 : 未运行（可双击「Jitang Simmer 图标.app」打开）"
+fi
 echo ""
 
 # ---- 最近上报 ----

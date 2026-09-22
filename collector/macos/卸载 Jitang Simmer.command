@@ -32,9 +32,18 @@ else
 fi
 
 # 2) 停止残留进程
-pkill -f "simmer-collector.js" 2>/dev/null && echo "✓ 已停止采集代理"
-pkill -f "simmer-fg-probe" 2>/dev/null || true
-pkill -f "simmer-hw-probe" 2>/dev/null || true
+#    用锁文件 pid 停采集代理、用 -x 精确匹配进程名停探针与菜单栏图标；
+#    不用 pkill -f（它会匹配整条命令行，可能误杀命令行里含该字符串的无关进程）
+LOCK="$HOME/Library/Application Support/SimmerCollector/collector.lock"
+if [ -f "$LOCK" ]; then
+  LOCK_PID="$(/usr/bin/python3 -c "import json;print(json.load(open('$LOCK')).get('pid',''))" 2>/dev/null || true)"
+  if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+    kill "$LOCK_PID" 2>/dev/null && echo "✓ 已停止采集代理 (PID $LOCK_PID)"
+  fi
+fi
+pkill -x simmer-fg-probe 2>/dev/null || true
+pkill -x simmer-hw-probe 2>/dev/null || true
+pkill -x simmer-menubar 2>/dev/null && echo "✓ 已关闭菜单栏图标"
 
 # 3) 应用目录移入废纸篓（比 rm -rf 安全，可恢复）
 PARENT="$(dirname "$DIST")"

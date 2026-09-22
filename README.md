@@ -59,6 +59,33 @@ collector/（C# 采集端） ──┴──上报──▶ server/（Node 后�
 
 > 无后端时双击 `index.html` 仍可看内置演示假数据（固定种子，2022-01-01 至今 × 3 设备 × 13 软件）。
 
+### macOS 采集端
+
+macOS 侧在 `collector/macos/` 提供与 Windows 采集器同一上报契约的实现
+（软件使用时长 + AI Token + 硬件指标 + 心跳，共用同一 `deviceId`）：
+
+```bash
+cd collector/macos && ./build.sh          # 构建扫描器与三个 Swift 程序
+node simmer-collector.js                   # 常驻采集（本机模式）
+node simmer-collector.js --once            # 单次上报后退出
+node simmer-collector.js --server https://<中心服务器>/simmer   # 聚合模式
+```
+
+- **软件使用时长**：`simmer-fg-probe`（`NSWorkspace` 前台应用 + `CGEventSource`
+  空闲计时 + `CGSession` 锁屏）每 2 秒采样，Node 侧复刻 `MinuteAggregator` 的
+  分钟聚合语义（非空闲过半 + 主导应用）
+- **硬件指标**：`simmer-hw-probe` 取 CPU/内存（Mach）、GPU/显存（IOKit
+  `IOAccelerator`）、磁盘（`statfs`）；Apple Silicon 无免密的温度与功耗来源，
+  按「逐项缺失显示为不可用」的既有约定留空
+- **菜单栏图标**：`Jitang Simmer 图标.app` 常驻菜单栏显示采集状态，可打开面板、
+  查看日志、启动/停止/重启采集器（附件应用，不占 Dock）
+- **安装包**：`installer/build-macos-pkg.sh --server-url <地址> --token <token>`
+  生成 `.pkg`（用户域安装免管理员密码），安装后写入采集配置并为登录用户加载
+  LaunchAgent（采集代理 + 菜单栏图标）
+- **单实例**：采集器与菜单栏图标均有单实例保护，重复启动不会造成同分钟重复计数
+
+以上实现均不需要辅助功能 / 屏幕录制等系统授权。
+
 ## 🛠️ 技术栈
 
 - **前端**：HTML + CSS + 原生 JavaScript，零框架、零图表库、零构建；图表手写 SVG（Catmull-Rom 平滑折线、按各图 P95 独立分档并设置业务硬上限的点阵图等）
@@ -77,10 +104,12 @@ collector/（C# 采集端） ──┴──上报──▶ server/（Node 后�
 │   ├── charts.js       # 图表渲染引擎（heatmap / line / hbars / donut / vbars）
 │   └── app.js          # 状态管理 + 渲染调度
 ├── collector/
-│   ├── SimmerCollector/ # C# 托盘采集、来源发现、离线队列与上报
+│   ├── SimmerCollector/ # C# 托盘采集、来源发现、离线队列与上报（Windows）
 │   ├── SimmerTokenScan/ # Rust 请求级 Token 解析 sidecar
-│   └── build.ps1       # 生成两个本机运行 EXE
+│   ├── macos/          # macOS 采集实现（Swift 探针 + Node 采集代理 + 菜单栏图标）
+│   └── build.ps1       # 生成两个本机运行 EXE（Windows）
 ├── server/             # Node.js 中心后端（软件时长 + AI Token + 硬件 SQLite/API）
+├── installer/          # 安装包构建（Windows build-installer.ps1 / macOS build-macos-pkg.sh）
 └── docs/               # 交接文档 / 需求文档
 ```
 

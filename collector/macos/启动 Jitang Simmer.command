@@ -66,7 +66,7 @@ fi
 # 注意：LaunchAgent（开机自启）启动的实例不会写 logs/collector.pid，
 # 因此必须按进程名检测，否则手动启动会起第二个实例、污染统计。
 COLLECTOR_PID="$DIST/logs/collector.pid"
-RUNNING_PID="$(pgrep -f "simmer-collector\.js" 2>/dev/null | head -1)"
+RUNNING_PID="$(pgrep -f "collector/macos/simmer-collector\.js" 2>/dev/null | head -1)"
 if [ -n "$RUNNING_PID" ]; then
   echo "采集代理已在运行 (PID $RUNNING_PID)，不重复启动"
   echo "$RUNNING_PID" > "$COLLECTOR_PID"
