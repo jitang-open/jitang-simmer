@@ -1,0 +1,6 @@
+#!/bin/zsh
+# Jitang Simmer.app 启动器：转发到发行包根目录的「启动 Jitang Simmer.command」
+# 位于 <DIST>/Jitang Simmer.app/Contents/MacOS/JitangSimmer
+set -u
+DIST="$(cd "$(dirname "$0")/../../.." && pwd)"
+exec "$DIST/启动 Jitang Simmer.command"

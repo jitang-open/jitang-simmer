@@ -21,3 +21,10 @@ collector/simmer-token-scan.exe
 installer/JitangSimmerSetup/bin/
 installer/JitangSimmerSetup/obj/
 artifacts/
+
+# macOS 采集端编译产物与本地配置
+collector/macos/build/
+collector/simmer-fg-probe
+collector/simmer-hw-probe
+collector/simmer-token-scan
+collector/macos/collector-config.json

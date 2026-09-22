@@ -111,10 +111,17 @@ fn run() -> Result<ScanResult, String> {
         for file in files_named(
             &sessions,
             |path| {
-                matches!(
-                    path.file_name().and_then(|value| value.to_str()),
-                    Some("session.jsonl") | Some("session.jsonl.zstd")
-                )
+                // DSH 逐会话写入 `<session>.jsonl`（compression: none）或
+                // `<session>.jsonl.zstd`；较新的 DSH 会把记录格式版本写进文件名
+                // （如 session.v3.jsonl.zstd）。tokscale 的解析器按 zstd frame
+                // magic 分派、不依赖文件名，故这里按后缀识别全部会话转录，
+                // 同时把同目录的 session.lock 排除在外。
+                path.file_name()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|name| {
+                        name.starts_with("session.")
+                            && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zstd"))
+                    })
             },
             options.modified_since_ms,
         ) {
