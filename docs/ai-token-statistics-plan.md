@@ -1,10 +1,10 @@
 # Jitang Simmer AI Token 统计与本地来源发现
 
-> 实施状态：✅ M1.5 主链路已完成；v0.8.1 已完成 DSH `npx` 识别与 WorkBuddy 请求级统计。Codex、ZCode、DeepSeek Harness 和 WorkBuddy 均已在本机真实数据环境验收。
+> 实施状态：✅ M1.5 主链路已完成；v0.8.1 已完成 DSH `npx` 识别与 WorkBuddy 请求级统计。Codex、ZCode、DeepSeek Harness 和 WorkBuddy 均已在本机真实数据环境验收。v0.10.1 修复新版 DSH（转录改名为 `session.v4.jsonl.zstd`）采不到 Token 的问题，并同步升级 tokscale 解析器到 `1d9a939`。
 
 ## Implementation Result
 
-- 独立 `simmer-token-scan.exe` 已固定使用 `tokscale-core` 提交 `b069c85d530c35ba1a3517e80aaa8423428dccd8`，并以静态 CRT 的 Windows EXE 运行；不持有服务器 Token，也不联网。
+- 独立 `simmer-token-scan.exe` 已固定使用 `tokscale-core` 提交 `1d9a9395418efc6952944b794097935d7d6fa1e8`，并以静态 CRT 的 Windows EXE 运行；不持有服务器 Token，也不联网。
 - 采集器已实现手动路径 → 环境变量 → 用户默认目录的数据根优先级，以及进程、PATH、App Paths、卸载注册表、开始菜单和已知用户应用目录的有界程序发现；DSH 额外识别固定 npm/npx 包路径，不会递归扫描磁盘。
 - 文件变化约 5 秒触发、15 分钟兜底、48 小时增量、每日全量、原子离线队列和批量重试均已接入；本机持久化已确认的稳定哈希，活跃日志复扫只上传新增事件；Token 模块失败不会中断软件时长采集。
 - 后端已实现请求级幂等表、来源状态表、Bearer 批量上报和 summary/trend/year/breakdown/sources/dimensions 查询接口。
@@ -25,7 +25,7 @@
 
 - 采集器增加 `TokenSourceDiscovery`，启动时、每 30 分钟及用户点击“重新扫描 AI 工具”时执行：
   - Codex 数据目录优先级：Simmer 手动设置 → `CODEX_HOME` → `%USERPROFILE%\.codex`；检查 `sessions` 和 `archived_sessions`。
-  - DSH 数据目录优先级：Simmer 手动设置 → `DSH_HOME` → `%USERPROFILE%\.dsh`；检查 `sessions/**/session.jsonl(.zstd)`。
+  - DSH 数据目录优先级：Simmer 手动设置 → `DSH_HOME` → `%USERPROFILE%\.dsh`；检查 `sessions/**/session.jsonl`、`session.jsonl.zstd` 与版本化 `session.v<N>.jsonl[.zstd]`。新版 DSH 默认把真实转录写入 `session.v4.jsonl.zstd`，只认前两种拼写会让新版完全采不到 Token（v0.10.1 修复）。
   - ZCode 数据目录优先级：Simmer 手动设置 → `%USERPROFILE%\.zcode`；检查 `cli\db\db.sqlite` 和 `projects`。
   - WorkBuddy 数据目录优先级：Simmer 手动设置 → `WORKBUDDY_HOME` → `%USERPROFILE%\.workbuddy`；只检查 `projects/**/*.jsonl`。
   - 可执行程序仅用于状态和诊断：检查正在运行的进程、PATH、Windows App Paths、卸载注册表及已知用户应用目录；DSH 再检查固定 npm/npx 包路径，不递归扫描整块硬盘。
@@ -41,12 +41,12 @@
 
 ## Parsing and Privacy
 
-- 随采集器打包隐藏式 `simmer-token-scan.exe`，固定依赖 `tokscale-core` 提交 `b069c85d530c35ba1a3517e80aaa8423428dccd8`。
+- 随采集器打包隐藏式 `simmer-token-scan.exe`，固定依赖 `tokscale-core` 提交 `1d9a9395418efc6952944b794097935d7d6fa1e8`（v4.17.0，v0.10.1 起；此前为 `b069c85`），解析器版本串 `tokscale-1d9a939-wb1`。
 - 使用原始 `UnifiedMessage` 解析接口保留请求级粒度，而不是调用会按 session/model 汇总的普通 CLI。
-- Codex 复用累计值差分、模型切换、乱序快照、分叉会话和归档去重逻辑。[Codex 解析器](https://github.com/junhoyeo/tokscale/blob/b069c85d530c35ba1a3517e80aaa8423428dccd8/crates/tokscale-core/src/sessions/codex.rs)
-- ZCode 只读 `model_usage`，兼容新旧 SQLite 字段及缓存/推理重叠语义。[ZCode 解析器](https://github.com/junhoyeo/tokscale/blob/b069c85d530c35ba1a3517e80aaa8423428dccd8/crates/tokscale-core/src/sessions/zcode.rs)
-- DSH 读取普通或 Zstandard 会话日志，处理残缺尾帧、子任务种子历史和重复消息。[DSH 解析器](https://github.com/junhoyeo/tokscale/blob/b069c85d530c35ba1a3517e80aaa8423428dccd8/crates/tokscale-core/src/sessions/dsh.rs)
-- WorkBuddy 只读取项目 JSONL 的逐请求 usage，不读取会变化的累计 SQLite 快照；解析器来自同一固定 Tokscale 提交。[WorkBuddy 解析器](https://github.com/junhoyeo/tokscale/blob/b069c85d530c35ba1a3517e80aaa8423428dccd8/crates/tokscale-core/src/sessions/workbuddy.rs)
+- Codex 复用累计值差分、模型切换、乱序快照、分叉会话和归档去重逻辑。[Codex 解析器](https://github.com/junhoyeo/tokscale/blob/1d9a9395418efc6952944b794097935d7d6fa1e8/crates/tokscale-core/src/sessions/codex.rs)
+- ZCode 只读 `model_usage`，兼容新旧 SQLite 字段及缓存/推理重叠语义。[ZCode 解析器](https://github.com/junhoyeo/tokscale/blob/1d9a9395418efc6952944b794097935d7d6fa1e8/crates/tokscale-core/src/sessions/zcode.rs)
+- DSH 读取普通或 Zstandard 会话日志（含 `session.v<N>` 版本化文件名），处理残缺尾帧、子任务种子历史和重复消息；用量取自 `assistant/message` 的 `data.usage`，并兼容 `assistant/attempt` 内嵌流。[DSH 解析器](https://github.com/junhoyeo/tokscale/blob/1d9a9395418efc6952944b794097935d7d6fa1e8/crates/tokscale-core/src/sessions/dsh.rs)
+- WorkBuddy 只读取项目 JSONL 的逐请求 usage，不读取会变化的累计 SQLite 快照；解析器来自同一固定 Tokscale 提交。[WorkBuddy 解析器](https://github.com/junhoyeo/tokscale/blob/1d9a9395418efc6952944b794097935d7d6fa1e8/crates/tokscale-core/src/sessions/workbuddy.rs)
 - Sidecar 禁用定价和联网，只输出来源、provider、model、时间及五个互斥 Token 桶；缓存固定写入 `%APPDATA%\SimmerCollector\tokscale`。
 - `sourceEventId` 使用上游去重键的 SHA-256；服务器不保存会话 ID、项目路径、提示词、回答、代码、凭据或原始日志。
 - 首次导入全部历史；后续扫描最近 48 小时并稳定去重，每日全量扫描用于纠偏。
