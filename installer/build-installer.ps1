@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$OutputFile = '',
     [string]$SourceConfig = '',
     [string]$ServerUrl = '',
@@ -113,7 +113,7 @@ $deployment = [ordered]@{
     ServerUrl = $ServerUrl
     DashboardUrl = $DashboardUrl
     Token = $Token
-    Version = '0.10.0'
+    Version = '0.10.1'
 }
 [System.IO.File]::WriteAllText(
     $deploymentFile,
