@@ -10,7 +10,7 @@ use tokscale_core::sessions::{
 };
 use walkdir::WalkDir;
 
-const PARSER_VERSION: &str = "tokscale-b069c85-wb1";
+const PARSER_VERSION: &str = "tokscale-1d9a939-wb1";
 const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 #[derive(Default)]
@@ -111,17 +111,9 @@ fn run() -> Result<ScanResult, String> {
         for file in files_named(
             &sessions,
             |path| {
-                // DSH 逐会话写入 `<session>.jsonl`（compression: none）或
-                // `<session>.jsonl.zstd`；较新的 DSH 会把记录格式版本写进文件名
-                // （如 session.v3.jsonl.zstd）。tokscale 的解析器按 zstd frame
-                // magic 分派、不依赖文件名，故这里按后缀识别全部会话转录，
-                // 同时把同目录的 session.lock 排除在外。
                 path.file_name()
                     .and_then(|value| value.to_str())
-                    .is_some_and(|name| {
-                        name.starts_with("session.")
-                            && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zstd"))
-                    })
+                    .is_some_and(is_dsh_session_log)
             },
             options.modified_since_ms,
         ) {
@@ -210,6 +202,20 @@ fn required_path(
     args.next()
         .map(PathBuf::from)
         .ok_or_else(|| format!("missing_value:{argument}"))
+}
+
+/// DSH 会话转录文件：`session.jsonl`（`compression: none`）、`session.jsonl.zstd`，
+/// 以及新版把记录格式版本写进文件名的 `session.v<N>.jsonl[.zstd]`
+/// （曾见 `session.v3`，当前 DSH 默认写 `session.v4`）。
+///
+/// `.zstd` 只表示物理编码——tokscale 的解析器按 zstd frame magic 分派、不依赖
+/// 文件名，所以这里按 `session.` 前缀 + `.jsonl[.zstd]` 后缀识别全部会话转录
+/// （同目录的 `session.lock` 由此被自然排除）。只认 `session.jsonl(.zstd)` 会让
+/// 新版 DSH 完全采不到 Token：新版把真实转录写进 `session.v4.jsonl.zstd`，而旧的
+/// `session.jsonl.zstd` 只剩一个不含 usage 的会话种子事件。
+fn is_dsh_session_log(name: &str) -> bool {
+    name.starts_with("session.")
+        && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zstd"))
 }
 
 fn files_named(
@@ -371,6 +377,32 @@ mod tests {
         let serialized = serde_json::to_string(&first).unwrap();
         assert!(!serialized.contains("session-a"));
         assert!(!serialized.contains("upstream-stable-key"));
+    }
+
+    #[test]
+    fn accepts_plain_and_versioned_dsh_session_logs() {
+        // session.jsonl 表示 compression: none，.zstd 表示默认压缩，v<N> 是新版命名
+        for name in [
+            "session.jsonl",
+            "session.jsonl.zstd",
+            "session.v3.jsonl.zstd",
+            "session.v4.jsonl",
+            "session.v4.jsonl.zstd",
+            "session.v12.jsonl.zstd",
+        ] {
+            assert!(is_dsh_session_log(name), "应接受 {name}");
+        }
+        for name in [
+            "session.lock",
+            "session.jsonl.bak",
+            "session.jsonl.zstd.tmp",
+            "session.v4.jsonl.zstd.bak",
+            "other.jsonl",
+            "ui_messages.json",
+            "sessions.json",
+        ] {
+            assert!(!is_dsh_session_log(name), "应拒绝 {name}");
+        }
     }
 
     #[test]

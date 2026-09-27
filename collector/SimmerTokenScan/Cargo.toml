@@ -8,5 +8,5 @@ license = "MIT"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-tokscale-core = { git = "https://github.com/junhoyeo/tokscale.git", rev = "b069c85d530c35ba1a3517e80aaa8423428dccd8" }
+tokscale-core = { git = "https://github.com/junhoyeo/tokscale.git", rev = "1d9a9395418efc6952944b794097935d7d6fa1e8" }
 walkdir = "2"

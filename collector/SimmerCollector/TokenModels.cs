@@ -4,7 +4,7 @@ namespace SimmerCollector;
 
 internal static class TokenProtocol
 {
-    public const string ParserVersion = "tokscale-b069c85-wb1";
+    public const string ParserVersion = "tokscale-1d9a939-wb1";
     public static readonly string[] Sources = ["codex", "zcode", "dsh", "workbuddy"];
 }
 
