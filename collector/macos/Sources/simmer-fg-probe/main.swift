@@ -9,7 +9,8 @@
 //   {"app":"Safari","idle":false,"idleMs":812,"locked":false}
 //
 // 使用的都是 macOS 官方 API，均不需要辅助功能 / 屏幕录制等授权：
-//   - 前台应用：NSWorkspace.frontmostApplication
+//   - 前台应用：CGWindowListCopyWindowInfo（实时查询，避免长驻进程取值冻结），
+//               并以 NSWorkspace.frontmostApplication 兜底
 //   - 键鼠空闲：CGEventSource.secondsSinceLastEventType
 //   - 锁屏状态：CGSessionCopyCurrentDictionary
 //
@@ -53,14 +54,49 @@ while index < args.count {
  * 白名单不会因切换系统语言而失效；包名缺失时退回本地化名、最后退回可执行名。
  * 与 Windows 端「前台进程 exe 文件名」的粒度一致。
  */
-func frontmostAppName() -> String? {
-    guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+func appName(_ app: NSRunningApplication) -> String? {
     if let bundleURL = app.bundleURL {
         let name = bundleURL.deletingPathExtension().lastPathComponent
         if !name.isEmpty { return name }
     }
     if let localized = app.localizedName, !localized.isEmpty { return localized }
     if let executable = app.executableURL?.lastPathComponent, !executable.isEmpty { return executable }
+    return nil
+}
+
+/// 通过窗口服务器实时查询最前台的应用。
+///
+/// 为什么不直接用 NSWorkspace.frontmostApplication：该属性依赖 NSWorkspace 接收
+/// 分布式通知来更新缓存，而本探针是无 run loop 的长驻进程——实测连续运行数日后
+/// 取值会**冻结**在启动时的那个应用上（日志里表现为 6 天每分钟都记同一个软件）。
+/// CGWindowListCopyWindowInfo 每次调用都向窗口服务器实时查询，不依赖通知，
+/// 因此能持续跟踪前台切换；只取窗口层 layer 0（普通窗口），跳过菜单栏等浮层。
+func frontmostAppViaWindowList() -> NSRunningApplication? {
+    guard let windows = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return nil }
+    for window in windows {
+        guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+        guard let pid = window[kCGWindowOwnerPID as String] as? pid_t, pid > 0 else { continue }
+        if let app = NSRunningApplication(processIdentifier: pid) { return app }
+    }
+    return nil
+}
+
+/// 前台应用名。
+///
+/// 主用 NSWorkspace.frontmostApplication：语义最准（前台应用即使没有可见窗口也能
+/// 正确识别）。但它依赖 run loop 接收“前台应用变化”的分布式通知——本探针原先用
+/// Thread.sleep 轮询、没有 run loop，实测长驻数日后取值会**冻结**在启动时的那个应用
+/// 上（日志表现为连续 6 天每分钟都记同一个软件）。主循环因此改为 RunLoop 驱动。
+///
+/// CGWindowListCopyWindowInfo 作为兜底：每次调用都实时查询窗口服务器、不依赖通知，
+/// 用于 NSWorkspace 取不到值的情况。
+func frontmostAppName() -> String? {
+    if let app = NSWorkspace.shared.frontmostApplication, let name = appName(app) {
+        return name
+    }
+    if let app = frontmostAppViaWindowList(), let name = appName(app) { return name }
     return nil
 }
 
@@ -111,7 +147,9 @@ func emit(_ line: String) {
 let idleThresholdMs = idleThresholdMinutes * 60_000.0
 emit("{\"type\":\"hello\",\"version\":\"\(VERSION)\",\"intervalSeconds\":\(intervalSeconds)}")
 
-while true {
+/// 采样一次并输出。用 RunLoop + Timer 驱动（而非 Thread.sleep 轮询），
+/// 使进程能持续处理 NSWorkspace 的前台应用变化通知，避免长驻取值冻结。
+func sampleAndEmit() {
     let idleMs = idleMilliseconds()
     let locked = isScreenLocked()
     let app = locked ? nil : frontmostAppName()
@@ -121,6 +159,11 @@ while true {
     let appField = app.map { "\"\(jsonEscape($0))\"" } ?? "null"
     emit("{\"app\":\(appField),\"idle\":\(idle ? "true" : "false"),"
         + "\"idleMs\":\(Int(idleMs)),\"locked\":\(locked ? "true" : "false")}")
-
-    Thread.sleep(forTimeInterval: intervalSeconds)
 }
+
+sampleAndEmit()                       // 启动后立即采一次，便于上层尽快拿到状态
+let timer = Timer(timeInterval: intervalSeconds, repeats: true) { _ in
+    sampleAndEmit()
+}
+RunLoop.main.add(timer, forMode: .common)
+RunLoop.main.run()
