@@ -76,7 +76,7 @@ const HARDWARE_QUEUE_FILE = path.join(STATE_DIR, 'hardware-queue.json');
 const LOG_ROOT = path.join(STATE_DIR, 'logs');
 const LEGACY_LOG_FILE = path.join(STATE_DIR, 'mac-collector.log');
 
-const PARSER_VERSION = 'tokscale-b069c85-wb1';
+const PARSER_VERSION = 'tokscale-1d9a939-wb1';
 const COLLECTOR_VERSION = 'simmer-macos-collector/0.11.0';
 const SOURCES = ['codex', 'zcode', 'dsh', 'workbuddy'];
 const SAMPLE_INTERVAL_SECONDS = 2;   // 与 Windows _sampleTimer 一致
