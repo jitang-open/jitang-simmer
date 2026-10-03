@@ -24,6 +24,7 @@ const db = require('./db');
 const agg = require('./aggregate');
 const tokenAgg = require('./token-aggregate');
 const hardwareAgg = require('./hardware-aggregate');
+const log = require('./log');
 
 /* ---------- 配置（首启自动生成 token） ---------- */
 const CONFIG_PATH = process.env.SIMMER_CONFIG_PATH || path.join(__dirname, 'config.json');
@@ -45,6 +46,17 @@ if (process.env.SIMMER_TOKEN) {
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '8mb' }));
+
+/* ---------- 文件日志（仅正式启动时启用，测试加载 app 不产生副作用） ---------- */
+const fileLoggingEnabled = require.main === module;
+if (fileLoggingEnabled) log.teeConsole();
+app.use((req, res, next) => {
+  if (!fileLoggingEnabled || req.headers['x-simmer-health']) return next();
+  const startedAt = Date.now();
+  res.on('finish', () =>
+    log.access(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - startedAt}ms`));
+  next();
+});
 
 /* ---------- 上报 ---------- */
 const upsertDevice = db.prepare(`

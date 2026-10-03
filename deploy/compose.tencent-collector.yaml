@@ -11,6 +11,7 @@ services:
       SIMMER_HOST: 0.0.0.0
       SIMMER_PORT: 8788
       SIMMER_TOKEN: ${SIMMER_TOKEN:?请在 deploy/.env 中设置 SIMMER_TOKEN}
+      TZ: Asia/Shanghai
     ports:
       - "127.0.0.1:8788:8788"
     volumes:
