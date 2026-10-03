@@ -83,6 +83,7 @@ node simmer-collector.js --server https://<中心服务器>/simmer   # 聚合模
   生成 `.pkg`（用户域安装免管理员密码），安装后写入采集配置并为登录用户加载
   LaunchAgent（采集代理 + 菜单栏图标）
 - **单实例**：采集器与菜单栏图标均有单实例保护，重复启动不会造成同分钟重复计数
+- **日志**：`~/Library/Application Support/SimmerCollector/logs/<YYYY-MM>/log-<YYYY-MM-DD>.txt`，与 Windows 采集端同一套轮转策略（本地时间凌晨 4 点为一天分界、按月分文件夹、永不删除）；旧版单文件 `mac-collector.log` 首次写入时归档到 `logs/archive/`
 
 以上实现均不需要辅助功能 / 屏幕录制等系统授权。
 
