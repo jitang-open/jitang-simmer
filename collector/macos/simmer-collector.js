@@ -69,7 +69,12 @@ const STATE_FILE = path.join(STATE_DIR, 'mac-collector.json');
 const LEGACY_STATE_FILE = path.join(STATE_DIR, 'mac-uploader.json');
 const USAGE_QUEUE_FILE = path.join(STATE_DIR, 'usage-queue.json');
 const HARDWARE_QUEUE_FILE = path.join(STATE_DIR, 'hardware-queue.json');
-const LOG_FILE = path.join(STATE_DIR, 'mac-collector.log');
+/* 日志目录：logs/<YYYY-MM>/log-<YYYY-MM-DD>.txt
+ * 与 Windows 采集端 Log.cs 完全同一套语义：按天轮转、以凌晨 4 点为一天分界
+ * （4 点前算前一天）、按月分文件夹、历史日志永不删除。
+ * 旧版单文件 mac-collector.log 会被归档到 logs/archive/，内容一字不丢。 */
+const LOG_ROOT = path.join(STATE_DIR, 'logs');
+const LEGACY_LOG_FILE = path.join(STATE_DIR, 'mac-collector.log');
 
 const PARSER_VERSION = 'tokscale-b069c85-wb1';
 const COLLECTOR_VERSION = 'simmer-macos-collector/0.11.0';
@@ -83,12 +88,48 @@ const INCREMENTAL_WINDOW_HOURS = 48;
 const MAX_TOKEN_EVENTS = 5000;       // 服务器单请求上限
 
 /* ---------- 通用 ---------- */
-function log(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}`;
-  console.log(line);
+const pad2 = (value) => String(value).padStart(2, '0');
+
+/* 4 点分界的“日志日”与本地时刻前缀（与 Log.cs 的 now.AddHours(-4).Date 等价） */
+function logStamp(now) {
+  const day = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+  const dayString = `${day.getFullYear()}-${pad2(day.getMonth() + 1)}-${pad2(day.getDate())}`;
+  const clock = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+  return { dayString, clock };
+}
+
+let logDirectoryEnsured = '';
+let legacyLogMigrated = false;
+
+/** 旧版单文件日志只移动归档，不删除 */
+function migrateLegacyLog() {
+  if (legacyLogMigrated) return;
+  legacyLogMigrated = true;
   try {
-    fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.appendFileSync(LOG_FILE, line + '\n');
+    if (!fs.existsSync(LEGACY_LOG_FILE)) return;
+    const archive = path.join(LOG_ROOT, 'archive');
+    fs.mkdirSync(archive, { recursive: true });
+    let target = path.join(archive, 'mac-collector-legacy.log');
+    if (fs.existsSync(target)) {
+      target = path.join(archive, `mac-collector-legacy-${Date.now()}.log`);
+    }
+    fs.renameSync(LEGACY_LOG_FILE, target);
+  } catch { /* 迁移失败不影响写新日志 */ }
+}
+
+function log(msg) {
+  const now = new Date();
+  const { dayString, clock } = logStamp(now);
+  const line = `${dayString} ${clock} ${msg}`;
+  console.log(`[${now.toISOString()}] ${msg}`);
+  try {
+    migrateLegacyLog();
+    const directory = path.join(LOG_ROOT, dayString.slice(0, 7));
+    if (logDirectoryEnsured !== directory) {
+      fs.mkdirSync(directory, { recursive: true });
+      logDirectoryEnsured = directory;
+    }
+    fs.appendFileSync(path.join(directory, `log-${dayString}.txt`), line + '\n');
   } catch { /* 日志失败不阻塞采集 */ }
 }
 
