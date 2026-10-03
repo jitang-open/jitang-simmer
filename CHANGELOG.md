@@ -14,6 +14,12 @@
 - **服务端 HTTP 访问日志**：每次 API/页面请求记录一行 `[access] 方法 路径 状态码 耗时`；Docker 健康检查请求带 `x-simmer-health` 标记头，不计入日志。
 - 服务端 `console.log/warn/error` 输出同步落盘一份，`docker logs` 行为不变。
 
+### 变更
+
+- **macOS 采集端日志按天轮转**：与 Windows 采集器同一套策略——日志改为 `~/Library/Application Support/SimmerCollector/logs/<YYYY-MM>/log-<YYYY-MM-DD>.txt`，本地时间凌晨 4 点为一天分界、按月分文件夹、永不删除；旧版单文件 `mac-collector.log` 自动归档到 `logs/archive/`，内容不丢失。
+- **macOS Token 解析器升级**：`tokscale-core` 由 `b069c85` 升至 `1d9a939`（v4.17.0），`PARSER_VERSION` 同步为 `tokscale-1d9a939-wb1`（扫描器与采集端两端必须一致）。实测同一份数据下新旧解析器结果几乎一致（DSH 事件 4782 → 4783），同时确认 9-19 的 DSH 版本化文件名匹配对 `session.v4.jsonl.zstd` 依然有效。
+- **macOS 状态脚本适配**：`查看 Jitang Simmer 状态.command` 改为按轮转规则定位当日日志。
+
 ### 部署变更
 
 - `deploy/compose.yaml` 与 `deploy/compose.tencent-collector.yaml` 给 simmer 服务设置 `TZ: Asia/Shanghai`。
