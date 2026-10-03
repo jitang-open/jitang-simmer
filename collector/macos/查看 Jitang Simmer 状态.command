@@ -9,7 +9,13 @@ LABEL="io.jitang.simmer.collector"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 CONFIG="$DIST/collector/macos/collector-config.json"
 STATE_DIR="$HOME/Library/Application Support/SimmerCollector"
-LOG="$STATE_DIR/mac-collector.log"
+# 日志按天轮转：logs/<YYYY-MM>/log-<YYYY-MM-DD>.txt（凌晨 4 点分界，与采集端一致）
+LOG_DIR="$STATE_DIR/logs"
+today_log() {
+  local day="$(date -v-4H +%Y-%m-%d 2>/dev/null || date -d '-4 hours' +%Y-%m-%d)"
+  echo "$LOG_DIR/${day:0:7}/log-$day.txt"
+}
+LOG="$(today_log)"
 
 echo "=============================================="
 echo " Jitang Simmer 运行状态"
