@@ -31,6 +31,10 @@ internal sealed class TokenScannerManager : IDisposable
     private TimeSpan _fileChangedBackoff = FileChangedBackoffSteps[0];
     private int _zeroEventStreak;
 
+    private static readonly TimeSpan StatusUploadInterval = TimeSpan.FromMinutes(15);
+    private DateTimeOffset _lastStatusUploadAt = DateTimeOffset.MinValue;
+    private string _lastStatusSignature = "";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -135,19 +139,36 @@ internal sealed class TokenScannerManager : IDisposable
 
     private async Task FlushQueueAsync()
     {
+        bool statusDue;
+        lock (_rateLock) statusDue = DateTimeOffset.UtcNow - _lastStatusUploadAt >= StatusUploadInterval;
         bool statusesSent = false;
         while (!_disposed)
         {
             var batch = _store.Peek(2000);
             var statuses = statusesSent ? new List<TokenSourceStatus>() : _store.Statuses();
             if (batch.Count == 0 && statuses.Count == 0) break;
+            // 0 事件且来源状态无实质变化、未到降频窗口时直接跳过网络请求
+            // （CheckedAt 每轮扫描都会刷新，不参与比对）
+            if (batch.Count == 0 && !statusesSent && !statusDue && StatusSignature(statuses) == _lastStatusSignature)
+                break;
             bool ok = await Uploader.FlushTokenAsync(_config, batch, statuses);
             if (!ok) break;
             if (batch.Count > 0) _store.Dequeue(batch);
-            statusesSent = true;
+            if (!statusesSent)
+            {
+                statusesSent = true;
+                lock (_rateLock)
+                {
+                    _lastStatusUploadAt = DateTimeOffset.UtcNow;
+                    _lastStatusSignature = StatusSignature(_store.Statuses());
+                }
+            }
             if (batch.Count == 0) break;
         }
     }
+
+    private static string StatusSignature(List<TokenSourceStatus> statuses) =>
+        string.Join(";", statuses.Select(row => $"{row.Source}|{row.State}|{row.DetailCode}"));
 
     private static async Task<TokenScanOutput> InvokeScannerAsync(
         string scanner, List<TokenDiscoveryResult> discoveries, bool fullScan)
