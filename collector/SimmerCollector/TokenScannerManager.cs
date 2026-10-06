@@ -9,15 +9,25 @@ namespace SimmerCollector;
 /// </summary>
 internal sealed class TokenScannerManager : IDisposable
 {
+    // file_changed 限速：最小间隔 60 秒；连续 0 事件时按 1→2→5→10 分钟退避，扫到事件立即恢复 60 秒。
+    // 扫描器本身按 48h 修改窗口重读文件，监听事件只负责"何时扫"，跳过的扫描不会丢数据。
+    private static readonly TimeSpan[] FileChangedBackoffSteps =
+        [TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(300), TimeSpan.FromSeconds(600)];
+
     private readonly Config _config;
     private readonly TokenLocalStore _store = new();
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private readonly object _watchLock = new();
+    private readonly object _rateLock = new();
     private readonly System.Threading.Timer _scanTimer;
     private readonly System.Threading.Timer _debounceTimer;
     private List<FileSystemWatcher> _watchers = new();
     private volatile bool _paused;
     private bool _disposed;
+
+    private DateTimeOffset _lastFileChangedScanAt = DateTimeOffset.MinValue;
+    private TimeSpan _fileChangedBackoff = FileChangedBackoffSteps[0];
+    private int _zeroEventStreak;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -49,10 +59,32 @@ internal sealed class TokenScannerManager : IDisposable
     private async Task RunSafeAsync(string reason, bool forceFull = false)
     {
         if (_disposed || _paused || !_config.EnableTokenStatistics) return;
+        if (reason == "file_changed" && !FileChangedScanAllowed()) return;
         if (!await _scanLock.WaitAsync(0)) return;
         try { await ScanAndUploadAsync(reason, forceFull); }
         catch (Exception ex) { Log.Write("Token 扫描流程异常: " + ex.Message); }
         finally { _scanLock.Release(); }
+    }
+
+    private bool FileChangedScanAllowed()
+    {
+        lock (_rateLock) return DateTimeOffset.UtcNow - _lastFileChangedScanAt >= _fileChangedBackoff;
+    }
+
+    private void RecordFileChangedOutcome(int eventCount)
+    {
+        lock (_rateLock)
+        {
+            _lastFileChangedScanAt = DateTimeOffset.UtcNow;
+            if (eventCount > 0)
+            {
+                _zeroEventStreak = 0;
+                _fileChangedBackoff = FileChangedBackoffSteps[0];
+                return;
+            }
+            _zeroEventStreak = Math.Min(_zeroEventStreak + 1, FileChangedBackoffSteps.Length - 1);
+            _fileChangedBackoff = FileChangedBackoffSteps[_zeroEventStreak];
+        }
     }
 
     private async Task ScanAndUploadAsync(string reason, bool forceFull)
@@ -95,6 +127,7 @@ internal sealed class TokenScannerManager : IDisposable
         }
 
         _store.Merge(events, statuses, fullScan && scanSucceeded);
+        if (reason == "file_changed") RecordFileChangedOutcome(scanSucceeded ? events.Count : 0);
         await FlushQueueAsync();
     }
 
