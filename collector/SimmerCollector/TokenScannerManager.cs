@@ -162,7 +162,7 @@ internal sealed class TokenScannerManager : IDisposable
         {
             foreach (var watcher in _watchers) watcher.Dispose();
             _watchers = new List<FileSystemWatcher>();
-            foreach (string root in discoveries.Select(WatchRoot).OfType<string>().Where(Directory.Exists).Distinct())
+            foreach (string root in discoveries.SelectMany(WatchRoots).Where(Directory.Exists).Distinct())
             {
                 try
                 {
@@ -186,13 +186,31 @@ internal sealed class TokenScannerManager : IDisposable
         }
     }
 
-    private static string? WatchRoot(TokenDiscoveryResult discovery)
+    /// <summary>
+    /// 只监听扫描器真正读取的目录。整个数据根里混着各工具自己的高频运行时文件
+    /// （ZCode 的日志、rollout、exec 输出，WorkBuddy 的配置、认证与 SQLite WAL），
+    /// 整树监听会让 file_changed 扫描自激成 5 秒循环，与 WorkBuddy 的既有修法保持一致。
+    /// </summary>
+    private static IEnumerable<string> WatchRoots(TokenDiscoveryResult discovery)
     {
-        if (discovery.DataRoot == null) return null;
-        // WorkBuddy 的应用目录里还有频繁变化的配置、认证与 SQLite WAL；只监听逐请求日志目录。
-        return discovery.Source == "workbuddy"
-            ? Path.Combine(discovery.DataRoot, "projects")
-            : discovery.DataRoot;
+        if (discovery.DataRoot == null) yield break;
+        switch (discovery.Source)
+        {
+            case "codex":
+                yield return Path.Combine(discovery.DataRoot, "sessions");
+                yield return Path.Combine(discovery.DataRoot, "archived_sessions");
+                break;
+            case "zcode":
+                // 扫描器只读 cli/db/db.sqlite
+                yield return Path.Combine(discovery.DataRoot, "cli", "db");
+                break;
+            case "dsh":
+                yield return Path.Combine(discovery.DataRoot, "sessions");
+                break;
+            case "workbuddy":
+                yield return Path.Combine(discovery.DataRoot, "projects");
+                break;
+        }
     }
 
     private void DebounceScan()
