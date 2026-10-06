@@ -8,7 +8,7 @@ internal sealed class DeploymentConfig
     public string ServerUrl { get; init; } = "";
     public string DashboardUrl { get; init; } = "";
     public string Token { get; init; } = "";
-    public string Version { get; init; } = "0.10.0";
+    public string Version { get; init; } = "0.11.0";
 
     public static DeploymentConfig Load()
     {

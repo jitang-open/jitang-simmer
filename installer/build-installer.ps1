@@ -113,7 +113,7 @@ $deployment = [ordered]@{
     ServerUrl = $ServerUrl
     DashboardUrl = $DashboardUrl
     Token = $Token
-    Version = '0.10.1'
+    Version = '0.11.0'
 }
 [System.IO.File]::WriteAllText(
     $deploymentFile,

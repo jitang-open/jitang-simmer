@@ -54,14 +54,16 @@ internal sealed class TokenLocalStore
         }
     }
 
-    public void Merge(IEnumerable<TokenEvent> events, IEnumerable<TokenSourceStatus> statuses, bool fullScan)
+    /// <summary>recordFullScan 仅在自动全量（scheduled/file_changed 升级）时为 true；
+    /// 手动全量不重置自动 24 小时节拍，避免一次手动扫描把下次自动全量顺延。</summary>
+    public void Merge(IEnumerable<TokenEvent> events, IEnumerable<TokenSourceStatus> statuses, bool recordFullScan)
     {
         lock (_lock)
         {
             foreach (var row in events.Where(row => row.IsValid() && !_acknowledged.Contains(row.QueueKey)))
                 _events[row.QueueKey] = row;
             foreach (var row in statuses) _statuses[row.Source] = row;
-            if (fullScan) _lastFullScan = DateTimeOffset.UtcNow;
+            if (recordFullScan) _lastFullScan = DateTimeOffset.UtcNow;
             Persist();
         }
     }

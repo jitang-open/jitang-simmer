@@ -9,15 +9,31 @@ namespace SimmerCollector;
 /// </summary>
 internal sealed class TokenScannerManager : IDisposable
 {
+    // file_changed 限速：最小间隔 60 秒；连续 0 事件时按 1→2→5→10 分钟退避，扫到事件立即恢复 60 秒。
+    // 扫描器本身按 48h 修改窗口重读文件，监听事件只负责"何时扫"，跳过的扫描不会丢数据。
+    private static readonly TimeSpan[] FileChangedBackoffSteps =
+        [TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(300), TimeSpan.FromSeconds(600)];
+
     private readonly Config _config;
     private readonly TokenLocalStore _store = new();
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private readonly object _watchLock = new();
+    private readonly object _rateLock = new();
     private readonly System.Threading.Timer _scanTimer;
     private readonly System.Threading.Timer _debounceTimer;
     private List<FileSystemWatcher> _watchers = new();
+    private List<string> _watchTargets = new();
+    private bool _watchersDirty;
     private volatile bool _paused;
     private bool _disposed;
+
+    private DateTimeOffset _lastFileChangedScanAt = DateTimeOffset.MinValue;
+    private TimeSpan _fileChangedBackoff = FileChangedBackoffSteps[0];
+    private int _zeroEventStreak;
+
+    private static readonly TimeSpan StatusUploadInterval = TimeSpan.FromMinutes(15);
+    private DateTimeOffset _lastStatusUploadAt = DateTimeOffset.MinValue;
+    private string _lastStatusSignature = "";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -49,10 +65,32 @@ internal sealed class TokenScannerManager : IDisposable
     private async Task RunSafeAsync(string reason, bool forceFull = false)
     {
         if (_disposed || _paused || !_config.EnableTokenStatistics) return;
+        if (reason == "file_changed" && !FileChangedScanAllowed()) return;
         if (!await _scanLock.WaitAsync(0)) return;
         try { await ScanAndUploadAsync(reason, forceFull); }
         catch (Exception ex) { Log.Write("Token 扫描流程异常: " + ex.Message); }
         finally { _scanLock.Release(); }
+    }
+
+    private bool FileChangedScanAllowed()
+    {
+        lock (_rateLock) return DateTimeOffset.UtcNow - _lastFileChangedScanAt >= _fileChangedBackoff;
+    }
+
+    private void RecordFileChangedOutcome(int eventCount)
+    {
+        lock (_rateLock)
+        {
+            _lastFileChangedScanAt = DateTimeOffset.UtcNow;
+            if (eventCount > 0)
+            {
+                _zeroEventStreak = 0;
+                _fileChangedBackoff = FileChangedBackoffSteps[0];
+                return;
+            }
+            _zeroEventStreak = Math.Min(_zeroEventStreak + 1, FileChangedBackoffSteps.Length - 1);
+            _fileChangedBackoff = FileChangedBackoffSteps[_zeroEventStreak];
+        }
     }
 
     private async Task ScanAndUploadAsync(string reason, bool forceFull)
@@ -94,25 +132,43 @@ internal sealed class TokenScannerManager : IDisposable
             }
         }
 
-        _store.Merge(events, statuses, fullScan && scanSucceeded);
+        _store.Merge(events, statuses, fullScan && scanSucceeded && reason != "manual");
+        if (reason == "file_changed") RecordFileChangedOutcome(scanSucceeded ? events.Count : 0);
         await FlushQueueAsync();
     }
 
     private async Task FlushQueueAsync()
     {
+        bool statusDue;
+        lock (_rateLock) statusDue = DateTimeOffset.UtcNow - _lastStatusUploadAt >= StatusUploadInterval;
         bool statusesSent = false;
         while (!_disposed)
         {
             var batch = _store.Peek(2000);
             var statuses = statusesSent ? new List<TokenSourceStatus>() : _store.Statuses();
             if (batch.Count == 0 && statuses.Count == 0) break;
+            // 0 事件且来源状态无实质变化、未到降频窗口时直接跳过网络请求
+            // （CheckedAt 每轮扫描都会刷新，不参与比对）
+            if (batch.Count == 0 && !statusesSent && !statusDue && StatusSignature(statuses) == _lastStatusSignature)
+                break;
             bool ok = await Uploader.FlushTokenAsync(_config, batch, statuses);
             if (!ok) break;
             if (batch.Count > 0) _store.Dequeue(batch);
-            statusesSent = true;
+            if (!statusesSent)
+            {
+                statusesSent = true;
+                lock (_rateLock)
+                {
+                    _lastStatusUploadAt = DateTimeOffset.UtcNow;
+                    _lastStatusSignature = StatusSignature(_store.Statuses());
+                }
+            }
             if (batch.Count == 0) break;
         }
     }
+
+    private static string StatusSignature(List<TokenSourceStatus> statuses) =>
+        string.Join(";", statuses.Select(row => $"{row.Source}|{row.State}|{row.DetailCode}"));
 
     private static async Task<TokenScanOutput> InvokeScannerAsync(
         string scanner, List<TokenDiscoveryResult> discoveries, bool fullScan)
@@ -158,11 +214,21 @@ internal sealed class TokenScannerManager : IDisposable
 
     private void RefreshWatchers(List<TokenDiscoveryResult> discoveries)
     {
+        var desired = discoveries
+            .SelectMany(WatchRoots)
+            .Where(Directory.Exists)
+            .Distinct()
+            .ToList();
+
         lock (_watchLock)
         {
+            // 监听器只在目标目录变化或自身失效时重建；扫描期间稳定复用，
+            // 避免"每次扫描销毁重建 → 触发事件 → 再扫描"的放大回路。
+            if (!_watchersDirty && TargetsUnchanged(desired)) return;
             foreach (var watcher in _watchers) watcher.Dispose();
             _watchers = new List<FileSystemWatcher>();
-            foreach (string root in discoveries.Select(WatchRoot).OfType<string>().Where(Directory.Exists).Distinct())
+            _watchTargets = desired;
+            foreach (string root in desired)
             {
                 try
                 {
@@ -170,29 +236,63 @@ internal sealed class TokenScannerManager : IDisposable
                     {
                         IncludeSubdirectories = true,
                         NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                        InternalBufferSize = 64 * 1024,
                         EnableRaisingEvents = true,
                     };
-                    FileSystemEventHandler changed = (_, _) => DebounceScan();
-                    RenamedEventHandler renamed = (_, _) => DebounceScan();
+                    FileSystemEventHandler changed = (_, e) => { if (WatchedFile(e.Name)) DebounceScan(); };
+                    RenamedEventHandler renamed = (_, e) => { if (WatchedFile(e.Name)) DebounceScan(); };
                     watcher.Changed += changed;
                     watcher.Created += changed;
                     watcher.Deleted += changed;
                     watcher.Renamed += renamed;
-                    watcher.Error += (_, _) => DebounceScan();
+                    // 缓冲溢出只标记失效，等下一次扫描时重建；被丢弃的事件由扫描器的 48h 修改窗口兜底，不会丢数据
+                    watcher.Error += (_, _) => _watchersDirty = true;
                     _watchers.Add(watcher);
                 }
                 catch (Exception ex) { Log.Write("Token 文件监听器创建失败: " + ex.Message); }
             }
+            _watchersDirty = false;
         }
     }
 
-    private static string? WatchRoot(TokenDiscoveryResult discovery)
+    private bool TargetsUnchanged(List<string> desired)
     {
-        if (discovery.DataRoot == null) return null;
-        // WorkBuddy 的应用目录里还有频繁变化的配置、认证与 SQLite WAL；只监听逐请求日志目录。
-        return discovery.Source == "workbuddy"
-            ? Path.Combine(discovery.DataRoot, "projects")
-            : discovery.DataRoot;
+        return _watchTargets.Count == desired.Count &&
+            _watchTargets.Zip(desired, (current, next) =>
+                string.Equals(current, next, StringComparison.OrdinalIgnoreCase)).All(equal => equal);
+    }
+
+    // 只响应会话 JSONL（codex/dsh/workbuddy）与 ZCode 的 db.sqlite/-wal/-shm，过滤同目录内的无关扰动
+    private static bool WatchedFile(string? name) =>
+        string.IsNullOrEmpty(name) ||
+        name.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ||
+        name.StartsWith("db.sqlite", StringComparison.Ordinal);
+
+    /// <summary>
+    /// 只监听扫描器真正读取的目录。整个数据根里混着各工具自己的高频运行时文件
+    /// （ZCode 的日志、rollout、exec 输出，WorkBuddy 的配置、认证与 SQLite WAL），
+    /// 整树监听会让 file_changed 扫描自激成 5 秒循环，与 WorkBuddy 的既有修法保持一致。
+    /// </summary>
+    private static IEnumerable<string> WatchRoots(TokenDiscoveryResult discovery)
+    {
+        if (discovery.DataRoot == null) yield break;
+        switch (discovery.Source)
+        {
+            case "codex":
+                yield return Path.Combine(discovery.DataRoot, "sessions");
+                yield return Path.Combine(discovery.DataRoot, "archived_sessions");
+                break;
+            case "zcode":
+                // 扫描器只读 cli/db/db.sqlite
+                yield return Path.Combine(discovery.DataRoot, "cli", "db");
+                break;
+            case "dsh":
+                yield return Path.Combine(discovery.DataRoot, "sessions");
+                break;
+            case "workbuddy":
+                yield return Path.Combine(discovery.DataRoot, "projects");
+                break;
+        }
     }
 
     private void DebounceScan()
