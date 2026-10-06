@@ -22,6 +22,8 @@ internal sealed class TokenScannerManager : IDisposable
     private readonly System.Threading.Timer _scanTimer;
     private readonly System.Threading.Timer _debounceTimer;
     private List<FileSystemWatcher> _watchers = new();
+    private List<string> _watchTargets = new();
+    private bool _watchersDirty;
     private volatile bool _paused;
     private bool _disposed;
 
@@ -191,11 +193,21 @@ internal sealed class TokenScannerManager : IDisposable
 
     private void RefreshWatchers(List<TokenDiscoveryResult> discoveries)
     {
+        var desired = discoveries
+            .SelectMany(WatchRoots)
+            .Where(Directory.Exists)
+            .Distinct()
+            .ToList();
+
         lock (_watchLock)
         {
+            // 监听器只在目标目录变化或自身失效时重建；扫描期间稳定复用，
+            // 避免"每次扫描销毁重建 → 触发事件 → 再扫描"的放大回路。
+            if (!_watchersDirty && TargetsUnchanged(desired)) return;
             foreach (var watcher in _watchers) watcher.Dispose();
             _watchers = new List<FileSystemWatcher>();
-            foreach (string root in discoveries.SelectMany(WatchRoots).Where(Directory.Exists).Distinct())
+            _watchTargets = desired;
+            foreach (string root in desired)
             {
                 try
                 {
@@ -203,21 +215,37 @@ internal sealed class TokenScannerManager : IDisposable
                     {
                         IncludeSubdirectories = true,
                         NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                        InternalBufferSize = 64 * 1024,
                         EnableRaisingEvents = true,
                     };
-                    FileSystemEventHandler changed = (_, _) => DebounceScan();
-                    RenamedEventHandler renamed = (_, _) => DebounceScan();
+                    FileSystemEventHandler changed = (_, e) => { if (WatchedFile(e.Name)) DebounceScan(); };
+                    RenamedEventHandler renamed = (_, e) => { if (WatchedFile(e.Name)) DebounceScan(); };
                     watcher.Changed += changed;
                     watcher.Created += changed;
                     watcher.Deleted += changed;
                     watcher.Renamed += renamed;
-                    watcher.Error += (_, _) => DebounceScan();
+                    // 缓冲溢出只标记失效，等下一次扫描时重建；被丢弃的事件由扫描器的 48h 修改窗口兜底，不会丢数据
+                    watcher.Error += (_, _) => _watchersDirty = true;
                     _watchers.Add(watcher);
                 }
                 catch (Exception ex) { Log.Write("Token 文件监听器创建失败: " + ex.Message); }
             }
+            _watchersDirty = false;
         }
     }
+
+    private bool TargetsUnchanged(List<string> desired)
+    {
+        return _watchTargets.Count == desired.Count &&
+            _watchTargets.Zip(desired, (current, next) =>
+                string.Equals(current, next, StringComparison.OrdinalIgnoreCase)).All(equal => equal);
+    }
+
+    // 只响应会话 JSONL（codex/dsh/workbuddy）与 ZCode 的 db.sqlite/-wal/-shm，过滤同目录内的无关扰动
+    private static bool WatchedFile(string? name) =>
+        string.IsNullOrEmpty(name) ||
+        name.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ||
+        name.StartsWith("db.sqlite", StringComparison.Ordinal);
 
     /// <summary>
     /// 只监听扫描器真正读取的目录。整个数据根里混着各工具自己的高频运行时文件
