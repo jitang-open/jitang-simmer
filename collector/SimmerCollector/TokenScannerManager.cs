@@ -132,7 +132,7 @@ internal sealed class TokenScannerManager : IDisposable
             }
         }
 
-        _store.Merge(events, statuses, fullScan && scanSucceeded);
+        _store.Merge(events, statuses, fullScan && scanSucceeded && reason != "manual");
         if (reason == "file_changed") RecordFileChangedOutcome(scanSucceeded ? events.Count : 0);
         await FlushQueueAsync();
     }
