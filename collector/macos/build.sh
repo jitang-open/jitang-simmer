@@ -83,9 +83,9 @@ cat > "$MENUBAR_APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.12.0</string>
+	<string>0.11.0</string>
 	<key>CFBundleVersion</key>
-	<string>0.12.0</string>
+	<string>0.11.0</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>LSMinimumSystemVersion</key>
