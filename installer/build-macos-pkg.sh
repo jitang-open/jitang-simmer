@@ -105,6 +105,16 @@ rsync -a --exclude '._*' \
 find "$PAYLOAD" -name '._*' -delete 2>/dev/null || true
 xattr -cr "$PAYLOAD" 2>/dev/null || true
 
+# 菜单栏图标以「普通目录」形式随包分发，改名为 _menubar_bundle。
+# 原因：macOS 安装器对 .app bundle 会做版本比较——当包内版本不高于已安装版本时
+# 会整包跳过（实测把 0.12.0 降到 0.11.0 后，.app 完全没有被替换，其他文件正常）。
+# 改名后安装器按普通目录处理，必被覆盖；postinstall 再复制成真正的 .app。
+if [ -d "$PAYLOAD/Jitang Simmer 图标.app" ]; then
+  rm -rf "$PAYLOAD/_menubar_bundle"
+  mv "$PAYLOAD/Jitang Simmer 图标.app" "$PAYLOAD/_menubar_bundle"
+  echo "    菜单栏图标已改为普通目录分发（_menubar_bundle），避免安装器跳过 bundle"
+fi
+
 # ---- 写入采集端配置（聚合模式） ----
 cat > "$PAYLOAD/collector/macos/collector-config.json" <<JSON
 {
@@ -158,6 +168,17 @@ else
   APP_DIR="$USER_HOME/Applications/Jitang Simmer"
 fi
 log "安装目录 $APP_DIR"
+
+# 菜单栏图标：从普通目录还原为 .app（安装器不会跳过普通目录，因此每次都会更新）
+if [ -d "$APP_DIR/_menubar_bundle" ]; then
+  /bin/rm -rf "$APP_DIR/Jitang Simmer 图标.app"
+  if /bin/mv "$APP_DIR/_menubar_bundle" "$APP_DIR/Jitang Simmer 图标.app"; then
+    log "菜单栏图标已更新为包内版本"
+  else
+    log "菜单栏图标替换失败，继续使用现有版本"
+  fi
+fi
+/bin/chmod +x "$APP_DIR/Jitang Simmer 图标.app/Contents/MacOS/simmer-menubar" 2>/dev/null || true
 
 LA_DIR="$USER_HOME/Library/LaunchAgents"
 /bin/mkdir -p "$LA_DIR"
