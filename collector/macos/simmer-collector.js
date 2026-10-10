@@ -76,9 +76,9 @@ const HARDWARE_QUEUE_FILE = path.join(STATE_DIR, 'hardware-queue.json');
 const LOG_ROOT = path.join(STATE_DIR, 'logs');
 const LEGACY_LOG_FILE = path.join(STATE_DIR, 'mac-collector.log');
 
-const PARSER_VERSION = 'tokscale-1d9a939-wb1';
+const PARSER_VERSION = 'tokscale-1d9a939-wb2';
 const COLLECTOR_VERSION = 'simmer-macos-collector/0.11.0';
-const SOURCES = ['codex', 'zcode', 'dsh', 'workbuddy'];
+const SOURCES = ['codex', 'zcode', 'dsh', 'workbuddy', 'hermes'];
 const SAMPLE_INTERVAL_SECONDS = 2;   // 与 Windows _sampleTimer 一致
 const USAGE_BATCH_SIZE = 500;
 const HARDWARE_BATCH_SIZE = 2000;    // 与 C# Peek(2000) 一致
@@ -490,6 +490,12 @@ function discoverSources() {
       source: 'workbuddy', root: resolveRoot('WORKBUDDY_HOME', '.workbuddy'), executable: 'workbuddy',
       hasData: (root) => hasFilesDeep(root, ['projects'], (f) => f.endsWith('.jsonl')),
     },
+    {
+      // Hermes Agent（Nous Research）：用量聚合在 ~/.hermes/state.db
+      // （sessions / session_model_usage 两张表），由扫描器的 hermes 解析器读取
+      source: 'hermes', root: resolveRoot('HERMES_HOME', '.hermes'), executable: 'hermes',
+      hasData: (root) => fs.existsSync(path.join(root, 'state.db')),
+    },
   ];
   const now = new Date().toISOString();
   return defs.map(({ source, root, executable, hasData }) => {
@@ -659,8 +665,9 @@ async function scanTokens() {
     events = (output.events || []).filter(isValidEvent);
     const d = output.diagnostics || {};
     log(`Token 扫描完成(${fullScan ? 'full' : '48h'})：Codex ${d.codexFiles || 0} 文件，` +
-      `ZCode ${d.zcodeDatabases || 0} 库，DSH ${d.dshFiles || 0} 文件，` +
-      `WorkBuddy ${d.workBuddyFiles || 0} 文件，事件 ${events.length} 条`);
+      `ZCode ${d.zcodeDatabases || 0} 库，Hermes ${d.hermesDatabases || 0} 库，` +
+      `DSH ${d.dshFiles || 0} 文件，WorkBuddy ${d.workBuddyFiles || 0} 文件，` +
+      `事件 ${events.length} 条`);
     if (fullScan) writeState({ ...state, lastFullScanAt: new Date().toISOString() });
   } catch (err) {
     log('Token 扫描失败（不影响软件时长与心跳）: ' + err.message);
