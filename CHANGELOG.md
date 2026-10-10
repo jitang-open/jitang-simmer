@@ -4,6 +4,12 @@
 
 ## 未发布
 
+### 新增
+
+- **Hermes Agent 来源**：接入 Hermes Agent（Nous Research）的 Token 统计。用量从 `~/.hermes/state.db`（或 `$HERMES_HOME/state.db`）的 `sessions` / `session_model_usage` 两张表读取，支持按模型与 provider 拆分；扫描器新增 `--hermes-root`，macOS 与 Windows 采集端同步加入来源发现，面板来源筛选、来源状态与排行均支持 Hermes。
+- **数据库迁移**：`ai_token_events` / `ai_source_status` 的 `source` CHECK 约束扩展以接纳 `hermes`，沿用 v0.7.2 的事务重建做法，历史事件与来源状态原样保留（腾讯云库 24,599 条事件迁移后计数不变、完整性检查 ok）。
+- **协议版本**：解析器版本升为 `tokscale-1d9a939-wb2`（扫描器与采集端两端必须一致；旧版扫描器遇到 `--hermes-root` 会报 `unknown_argument`，因此两端需同时更新）。
+
 ### 修复
 
 - **macOS 安装包会静默跳过菜单栏图标**：macOS 安装器对 `.app` bundle 会做版本比较——当包内版本不高于已安装版本时，**整个 bundle 被跳过且不报错**。实测把菜单栏图标从 0.12.0 降到 0.11.0 后，其余文件全部更新到当天时间戳，唯独 `.app` 仍是旧版（9-22），照此下去以后每次改菜单栏图标都会装成旧版。现改为以普通目录 `_menubar_bundle` 随包分发（安装器按普通目录处理、必被覆盖），由 postinstall 还原为 `.app`；安装后校验 `菜单栏图标已更新为包内版本`。

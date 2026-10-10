@@ -1,6 +1,6 @@
 # Jitang Simmer AI Token 统计与本地来源发现
 
-> 实施状态：✅ M1.5 主链路已完成；v0.8.1 已完成 DSH `npx` 识别与 WorkBuddy 请求级统计。Codex、ZCode、DeepSeek Harness 和 WorkBuddy 均已在本机真实数据环境验收。v0.10.1 修复新版 DSH（转录改名为 `session.v4.jsonl.zstd`）采不到 Token 的问题，并同步升级 tokscale 解析器到 `1d9a939`。
+> 实施状态：✅ M1.5 主链路已完成；v0.8.1 已完成 DSH `npx` 识别与 WorkBuddy 请求级统计。Codex、ZCode、DeepSeek Harness、WorkBuddy 和 Hermes 均已在本机真实数据环境验收。v0.10.1 修复新版 DSH（转录改名为 `session.v4.jsonl.zstd`）采不到 Token 的问题，并同步升级 tokscale 解析器到 `1d9a939`。
 
 ## Implementation Result
 
@@ -16,9 +16,9 @@
 
 ## Summary
 
-- 增加“本地 AI 数据源发现模块”，自动寻找 Codex、ZCode、DeepSeek Harness 和 WorkBuddy 的数据目录和可执行程序。
+- 增加“本地 AI 数据源发现模块”，自动寻找 Codex、ZCode、DeepSeek Harness、WorkBuddy 和 Hermes 的数据目录和可执行程序。
 - 统计真正以日志或数据库为准，而不是以程序是否安装为准：程序卸载后仍可导入尚存的日志；已经入库的数据即使原日志随后删除也继续累计；程序已安装但尚无会话时显示“已安装，暂无数据”。
-- 当前统计 Codex、ZCode、DeepSeek Harness 和 WorkBuddy，不直接统计 OpenCode、DeepSeek API、网页或套餐额度。
+- 当前统计 Codex、ZCode、DeepSeek Harness、WorkBuddy 和 Hermes，不直接统计 OpenCode、DeepSeek API、网页或套餐额度。
 - OpenCode Go 中的 DeepSeek V4 Flash 经 Harness 调用后，以 DeepSeek Harness 为来源、实际 provider/model 为维度统计真实 Token，但不代表 Go 套餐剩余额度。
 
 ## Discovery and Collection
@@ -70,5 +70,5 @@
 - 验证不会扫描整个磁盘，不会把程序路径或敏感文本上传。
 - 覆盖 Codex 分叉与累计差分、ZCode 新旧数据库、DSH 压缩/残缺/子任务去重，以及重复全量导入。
 - 验证 sidecar 超时、损坏、版本不兼容时只影响 Token 模块，不拖垮前台时长采集。
-- 运行 Rust、.NET、Node 和前端检查，并在真实 Codex、ZCode、DSH、WorkBuddy 环境验收。
+- 运行 Rust、.NET、Node 和前端检查，并在真实 Codex、ZCode、DSH、WorkBuddy、Hermes 环境验收。
 - 更新 README、需求文档和交接文档，记录发现优先级、手动覆盖、来源状态、隐私边界、第三方许可及最新变更；保留 `server/config.example.json`。
