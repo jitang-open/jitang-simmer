@@ -5,12 +5,12 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tokscale_core::sessions::{
-    codex::parse_codex_file, dsh::parse_dsh_file, workbuddy::parse_workbuddy_file,
-    zcode::parse_zcode_sqlite, UnifiedMessage,
+    codex::parse_codex_file, dsh::parse_dsh_file, hermes::parse_hermes_sqlite,
+    workbuddy::parse_workbuddy_file, zcode::parse_zcode_sqlite, UnifiedMessage,
 };
 use walkdir::WalkDir;
 
-const PARSER_VERSION: &str = "tokscale-1d9a939-wb1";
+const PARSER_VERSION: &str = "tokscale-1d9a939-wb2";
 const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 #[derive(Default)]
@@ -19,6 +19,7 @@ struct Options {
     zcode_root: Option<PathBuf>,
     dsh_root: Option<PathBuf>,
     workbuddy_root: Option<PathBuf>,
+    hermes_root: Option<PathBuf>,
     modified_since_ms: Option<u128>,
 }
 
@@ -52,6 +53,7 @@ struct ScanResult {
 struct Diagnostics {
     codex_files: usize,
     zcode_databases: usize,
+    hermes_databases: usize,
     dsh_files: usize,
     work_buddy_files: usize,
     skipped_invalid_events: usize,
@@ -102,6 +104,19 @@ fn run() -> Result<ScanResult, String> {
                 parse_zcode_sqlite(&database)
                     .into_iter()
                     .map(|message| ("zcode".into(), message)),
+            );
+        }
+    }
+
+    if let Some(root) = options.hermes_root.as_deref() {
+        // Hermes Agent 把用量聚合写在 state.db（sessions / session_model_usage）
+        let database = root.join("state.db");
+        if database.is_file() {
+            diagnostics.hermes_databases = 1;
+            messages.extend(
+                parse_hermes_sqlite(&database)
+                    .into_iter()
+                    .map(|message| ("hermes".into(), message)),
             );
         }
     }
@@ -172,6 +187,7 @@ fn parse_options() -> Result<Options, String> {
             "--codex-root" => options.codex_root = Some(required_path(&mut args, &argument)?),
             "--zcode-root" => options.zcode_root = Some(required_path(&mut args, &argument)?),
             "--dsh-root" => options.dsh_root = Some(required_path(&mut args, &argument)?),
+            "--hermes-root" => options.hermes_root = Some(required_path(&mut args, &argument)?),
             "--workbuddy-root" => {
                 options.workbuddy_root = Some(required_path(&mut args, &argument)?)
             }
