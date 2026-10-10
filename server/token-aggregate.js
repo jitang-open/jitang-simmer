@@ -6,7 +6,7 @@
 const db = require('./db');
 const { dayStr, eachDay, rangeBounds } = require('./time-range');
 
-const SOURCES = ['codex', 'zcode', 'dsh', 'workbuddy'];
+const SOURCES = ['codex', 'zcode', 'dsh', 'workbuddy', 'hermes'];
 const TOKEN_COLUMNS = [
   'input_tokens',
   'output_tokens',

@@ -13,6 +13,7 @@ fs.writeFileSync(process.env.SIMMER_CONFIG_PATH, JSON.stringify({ token: 'test-t
 
 const app = require('./index');
 const db = require('./db');
+const tokenAgg = require('./token-aggregate');
 let server;
 
 test.before(async () => {
@@ -147,8 +148,11 @@ test('Token 汇总、筛选、分组、热力图和来源状态返回一致数�
   assert.deepEqual(dimensions.body.models, ['glm-5.3', 'gpt-5.6-sol', 'kimi-k3-1']);
 
   const sourceRows = await request('/api/ai-tokens/sources?device=test-pc');
-  assert.equal(sourceRows.body.length, 4);
+  // 按来源定义动态断言，新增来源（如 hermes）时无需再改这里
+  assert.equal(sourceRows.body.length, tokenAgg.SOURCES.length);
+  assert.deepEqual(sourceRows.body.map(row => row.source).sort(), [...tokenAgg.SOURCES].sort());
   assert.equal(sourceRows.body.find(row => row.source === 'dsh').state, 'not_found');
+  assert.equal(sourceRows.body.find(row => row.source === 'hermes').state, 'not_found');
 
   const selectedDay = await request(`/api/ai-tokens/summary?device=test-pc&range=daily&date=${today}`);
   assert.equal(selectedDay.body.totalTokens, 325);
