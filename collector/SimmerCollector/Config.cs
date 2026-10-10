@@ -29,6 +29,8 @@ internal class Config
     public string ZCodeHome { get; set; } = "";
     public string DshHome { get; set; } = "";
     public string WorkBuddyHome { get; set; } = "";
+    /// <summary>Hermes Agent 数据根（留空自动检测 ~/.hermes；也可用 HERMES_HOME 覆盖）。</summary>
+    public string HermesHome { get; set; } = "";
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 

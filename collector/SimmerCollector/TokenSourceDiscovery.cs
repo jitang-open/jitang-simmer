@@ -34,6 +34,13 @@ internal static class TokenSourceDiscovery
                 ResolveRoot(config.WorkBuddyHome, "WORKBUDDY_HOME", ".workbuddy"),
                 root => HasFiles(root, ["projects"], "*.jsonl"),
                 ["workbuddy"], ["WorkBuddy"]),
+            // Hermes Agent（Nous Research）：用量聚合在 <root>\state.db
+            // （sessions / session_model_usage 两张表），由扫描器的 hermes 解析器读取
+            DiscoverOne(
+                "hermes",
+                ResolveRoot(config.HermesHome, "HERMES_HOME", ".hermes"),
+                root => File.Exists(Path.Combine(root, "state.db")),
+                ["hermes"], ["Hermes"]),
         ];
     }
 

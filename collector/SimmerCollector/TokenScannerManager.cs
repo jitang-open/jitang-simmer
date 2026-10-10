@@ -122,6 +122,7 @@ internal sealed class TokenScannerManager : IDisposable
                 Log.Write(
                     $"Token 扫描完成({reason}/{(fullScan ? "full" : "48h")})：" +
                     $"Codex {output.Diagnostics.CodexFiles} 文件，ZCode {output.Diagnostics.ZCodeDatabases} 库，" +
+                    $"Hermes {output.Diagnostics.HermesDatabases} 库，" +
                     $"DSH {output.Diagnostics.DshFiles} 文件，WorkBuddy {output.Diagnostics.WorkBuddyFiles} 文件，" +
                     $"事件 {events.Count} 条");
             }
