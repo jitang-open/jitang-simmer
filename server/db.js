@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS dashboard_settings (
 );
 CREATE TABLE IF NOT EXISTS ai_token_events (
   device_id          TEXT NOT NULL,
-  source             TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh', 'workbuddy')),
+  source             TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh', 'workbuddy', 'hermes')),
   source_event_id    TEXT NOT NULL,
   provider           TEXT NOT NULL DEFAULT '',
   model              TEXT NOT NULL DEFAULT '',
@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_token_events_dimensions
   ON ai_token_events (source, provider, model);
 CREATE TABLE IF NOT EXISTS ai_source_status (
   device_id       TEXT NOT NULL,
-  source          TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh', 'workbuddy')),
+  source          TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh', 'workbuddy', 'hermes')),
   state           TEXT NOT NULL,
   detail_code     TEXT NOT NULL DEFAULT '',
   checked_at      TEXT NOT NULL,
@@ -131,6 +131,55 @@ if (!tokenTableSql.includes("'workbuddy'")) {
       INSERT INTO ai_source_status SELECT * FROM ai_source_status_pre_workbuddy;
       DROP TABLE ai_token_events_pre_workbuddy;
       DROP TABLE ai_source_status_pre_workbuddy;
+      CREATE INDEX idx_ai_token_events_occurred ON ai_token_events (occurred_at, device_id);
+      CREATE INDEX idx_ai_token_events_dimensions ON ai_token_events (source, provider, model);
+    `);
+  })();
+}
+
+// v0.12.0：新增 hermes 来源。SQLite 同样无法直接扩展 CHECK 约束，
+// 沿用 v0.7.2 的做法在事务内重建两张 Token 表并原样迁移历史数据。
+// 注意：上面的 v0.7.2 迁移保持历史原样不动，由本段负责 hermes 这一步。
+const tokenTableSqlForHermes = db.prepare(
+  "SELECT sql FROM sqlite_master WHERE type='table' AND name='ai_token_events'"
+).pluck().get() || '';
+if (!tokenTableSqlForHermes.includes("'hermes'")) {
+  db.transaction(() => {
+    db.exec(`
+      DROP INDEX IF EXISTS idx_ai_token_events_occurred;
+      DROP INDEX IF EXISTS idx_ai_token_events_dimensions;
+      ALTER TABLE ai_token_events RENAME TO ai_token_events_pre_hermes;
+      ALTER TABLE ai_source_status RENAME TO ai_source_status_pre_hermes;
+      CREATE TABLE ai_token_events (
+        device_id          TEXT NOT NULL,
+        source             TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh', 'workbuddy', 'hermes')),
+        source_event_id    TEXT NOT NULL,
+        provider           TEXT NOT NULL DEFAULT '',
+        model              TEXT NOT NULL DEFAULT '',
+        occurred_at        TEXT NOT NULL,
+        input_tokens       INTEGER NOT NULL CHECK (input_tokens >= 0),
+        output_tokens      INTEGER NOT NULL CHECK (output_tokens >= 0),
+        cache_read_tokens  INTEGER NOT NULL CHECK (cache_read_tokens >= 0),
+        cache_write_tokens INTEGER NOT NULL CHECK (cache_write_tokens >= 0),
+        reasoning_tokens   INTEGER NOT NULL CHECK (reasoning_tokens >= 0),
+        total_tokens       INTEGER NOT NULL CHECK (total_tokens >= 0),
+        parser_version     TEXT NOT NULL DEFAULT '',
+        received_at        TEXT NOT NULL,
+        PRIMARY KEY (device_id, source, source_event_id)
+      ) WITHOUT ROWID;
+      CREATE TABLE ai_source_status (
+        device_id       TEXT NOT NULL,
+        source          TEXT NOT NULL CHECK (source IN ('codex', 'zcode', 'dsh', 'workbuddy', 'hermes')),
+        state           TEXT NOT NULL,
+        detail_code     TEXT NOT NULL DEFAULT '',
+        checked_at      TEXT NOT NULL,
+        parser_version  TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (device_id, source)
+      ) WITHOUT ROWID;
+      INSERT INTO ai_token_events SELECT * FROM ai_token_events_pre_hermes;
+      INSERT INTO ai_source_status SELECT * FROM ai_source_status_pre_hermes;
+      DROP TABLE ai_token_events_pre_hermes;
+      DROP TABLE ai_source_status_pre_hermes;
       CREATE INDEX idx_ai_token_events_occurred ON ai_token_events (occurred_at, device_id);
       CREATE INDEX idx_ai_token_events_dimensions ON ai_token_events (source, provider, model);
     `);
